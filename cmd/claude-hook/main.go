@@ -31,6 +31,17 @@ type HookOutput struct {
 	Reason   string `json:"reason,omitempty"`   // Detailed explanation for Claude
 }
 
+// PreToolUseOutput represents the JSON response for PreToolUse hooks
+type PreToolUseOutput struct {
+	HookSpecificOutput PreToolUseHookOutput `json:"hookSpecificOutput"`
+}
+
+type PreToolUseHookOutput struct {
+	HookEventName            string `json:"hookEventName"`
+	PermissionDecision       string `json:"permissionDecision"` // "allow", "deny", or "ask"
+	PermissionDecisionReason string `json:"permissionDecisionReason"`
+}
+
 func main() {
 	// Parse command-line flags
 	var (
@@ -220,6 +231,26 @@ func handlePreBashBlocking(input Input, verbose bool) {
 
 			// Check if the executable itself is a MySQL/MariaDB command
 			if executable == "mysql" || executable == "mysqldump" || executable == "mariadb" {
+				reason := fmt.Sprintf("MySQL commands are not allowed. You attempted to run: %s\n\nDetected MySQL command in: %s\n\nPlease use the Go database connection methods instead. The codebase already has database access configured through Go.\n\nAlternatives:\n- Check existing Go code for database queries\n- Look at the model definitions in the codebase\n- Read the existing test files for schema information", command, subCmd)
+
+				output := PreToolUseOutput{
+					HookSpecificOutput: PreToolUseHookOutput{
+						HookEventName:            "PreToolUse",
+						PermissionDecision:       "ask", // Show dialog to user
+						PermissionDecisionReason: reason,
+					},
+				}
+
+				jsonOutput, err := json.Marshal(output)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Failed to marshal JSON output: %v\n", err)
+					os.Exit(1)
+				}
+
+				// Output JSON to stdout for Claude
+				fmt.Println(string(jsonOutput))
+
+				// Also output user-friendly message to stderr
 				fmt.Fprintf(os.Stderr, "❌ BLOCKED: MySQL commands are not allowed\n")
 				fmt.Fprintf(os.Stderr, "\n")
 				fmt.Fprintf(os.Stderr, "You attempted to run: %s\n", command)
@@ -232,7 +263,8 @@ func handlePreBashBlocking(input Input, verbose bool) {
 				fmt.Fprintf(os.Stderr, "- Check existing Go code for database queries\n")
 				fmt.Fprintf(os.Stderr, "- Look at the model definitions in the codebase\n")
 				fmt.Fprintf(os.Stderr, "- Read the existing test files for schema information\n")
-				os.Exit(2)
+
+				os.Exit(0) // Exit successfully since we provided JSON
 			}
 		}
 	}
