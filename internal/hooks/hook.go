@@ -7,6 +7,9 @@ type Hook interface {
 
 	// PreEdit runs before files are edited
 	PreEdit(files []string, verbose bool) error
+
+	// PostEditJSON runs after files have been edited, suppressing stdout for JSON mode
+	PostEditJSON(files []string, verbose bool) error
 }
 
 var registry = make(map[string]Hook)

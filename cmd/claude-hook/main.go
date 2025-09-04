@@ -92,7 +92,7 @@ func main() {
 		var err error
 		switch *hookType {
 		case "post-edit":
-			err = hook.PostEdit(fileList, *verbose)
+			err = hook.PostEditJSON(fileList, *verbose)
 		case "pre-edit":
 			err = hook.PreEdit(fileList, *verbose)
 		default:

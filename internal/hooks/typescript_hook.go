@@ -113,3 +113,19 @@ func (h *TypeScriptHook) runTypeCheck(files []string, verbose bool) error {
 	fmt.Println("  ✓ Type check passed")
 	return nil
 }
+
+func (h *TypeScriptHook) PostEditJSON(files []string, verbose bool) error {
+	if len(files) == 0 {
+		return nil
+	}
+
+	// Redirect stdout to stderr to keep it clean for JSON
+	origStdout := os.Stdout
+	os.Stdout = os.Stderr
+	defer func() {
+		os.Stdout = origStdout
+	}()
+
+	// Run the regular PostEdit which will now output to stderr
+	return h.PostEdit(files, verbose)
+}

@@ -60,9 +60,25 @@ func (h *GoHook) PostEdit(files []string, verbose bool) error {
 	}
 
 	if hasErrors {
-		return fmt.Errorf("Go checks failed:\n\n%s", strings.Join(allErrors, "\n\n"))
+		return fmt.Errorf("go checks failed:\n\n%s", strings.Join(allErrors, "\n\n"))
 	}
 	return nil
+}
+
+func (h *GoHook) PostEditJSON(files []string, verbose bool) error {
+	if len(files) == 0 {
+		return nil
+	}
+
+	// Redirect stdout to stderr to keep it clean for JSON
+	origStdout := os.Stdout
+	os.Stdout = os.Stderr
+	defer func() {
+		os.Stdout = origStdout
+	}()
+
+	// Run the regular PostEdit which will now output to stderr
+	return h.PostEdit(files, verbose)
 }
 
 func (h *GoHook) runGoimports(files []string, verbose bool) error {
