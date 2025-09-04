@@ -20,9 +20,9 @@ That's it! Your Claude Code instance is now supercharged with automatic quality 
 Changes to hook code take effect **immediately** - no rebuild, no reinstall, no downtime. Perfect for development and customization.
 
 ### 🛡️ **Built-in Security**
-- **Pre-command filtering** blocks dangerous MySQL commands (`mysql`, `mysqldump`, `mariadb`)
+- **Smart command filtering** blocks MySQL CLI tools (`mysql`, `mysqldump`, `mariadb`)
+- Only blocks actual executable commands, not mentions in strings or commit messages
 - Prevents accidental database access via CLI
-- Configurable safety guardrails
 
 ### 📝 **Multi-Language Support**
 - **Go**: `goimports` → `gofumpt` → `golangci-lint` → `go test` → `go mod tidy`
@@ -121,7 +121,7 @@ The system supports two hook types:
 #### PreToolUse Hook (Security)
 - **Trigger**: Before `Bash` command execution  
 - **Purpose**: Block dangerous commands
-- **Current Rules**: Blocks MySQL CLI tools
+- **Current Rules**: Blocks MySQL CLI executables (smart parsing)
 
 ### Customization
 

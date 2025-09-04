@@ -77,7 +77,7 @@ The setup command automatically configures Claude Code hooks using:
 - Event: `PreToolUse`
 - Matcher: `Bash`
 - Command: `bash -c "cd /path/to/claude-hooks && go run cmd/claude-hook/main.go -type pre-bash"`
-- **Blocks MySQL commands** (mysql, mysqldump, mariadb) to prevent accidental database access via CLI
+- **Blocks MySQL CLI tools** (mysql, mysqldump, mariadb) using smart executable detection to prevent accidental database access
 
 **🔄 Live Reloading**: Changes to hook code take effect immediately - no rebuild or reinstall needed!
 

@@ -182,22 +182,27 @@ func handlePreBashBlocking(input Input, verbose bool) {
 		os.Exit(0)
 	}
 
-	// Check for MySQL/MariaDB commands
-	if strings.Contains(command, "mysql") ||
-		strings.Contains(command, "mysqldump") ||
-		strings.Contains(command, "mariadb") {
-		fmt.Fprintf(os.Stderr, "❌ BLOCKED: MySQL commands are not allowed\n")
-		fmt.Fprintf(os.Stderr, "\n")
-		fmt.Fprintf(os.Stderr, "You attempted to run: %s\n", command)
-		fmt.Fprintf(os.Stderr, "\n")
-		fmt.Fprintf(os.Stderr, "Please use the Go database connection methods instead.\n")
-		fmt.Fprintf(os.Stderr, "The codebase already has database access configured through Go.\n")
-		fmt.Fprintf(os.Stderr, "\n")
-		fmt.Fprintf(os.Stderr, "Alternatives:\n")
-		fmt.Fprintf(os.Stderr, "- Check existing Go code for database queries\n")
-		fmt.Fprintf(os.Stderr, "- Look at the model definitions in the codebase\n")
-		fmt.Fprintf(os.Stderr, "- Read the existing test files for schema information\n")
-		os.Exit(2)
+	// Check for MySQL/MariaDB commands by parsing the actual executable
+	// Split command to get the first word (the actual command being executed)
+	parts := strings.Fields(command)
+	if len(parts) > 0 {
+		executable := strings.ToLower(filepath.Base(parts[0]))
+
+		// Check if the executable itself is a MySQL/MariaDB command
+		if executable == "mysql" || executable == "mysqldump" || executable == "mariadb" {
+			fmt.Fprintf(os.Stderr, "❌ BLOCKED: MySQL commands are not allowed\n")
+			fmt.Fprintf(os.Stderr, "\n")
+			fmt.Fprintf(os.Stderr, "You attempted to run: %s\n", command)
+			fmt.Fprintf(os.Stderr, "\n")
+			fmt.Fprintf(os.Stderr, "Please use the Go database connection methods instead.\n")
+			fmt.Fprintf(os.Stderr, "The codebase already has database access configured through Go.\n")
+			fmt.Fprintf(os.Stderr, "\n")
+			fmt.Fprintf(os.Stderr, "Alternatives:\n")
+			fmt.Fprintf(os.Stderr, "- Check existing Go code for database queries\n")
+			fmt.Fprintf(os.Stderr, "- Look at the model definitions in the codebase\n")
+			fmt.Fprintf(os.Stderr, "- Read the existing test files for schema information\n")
+			os.Exit(2)
+		}
 	}
 
 	if verbose {
