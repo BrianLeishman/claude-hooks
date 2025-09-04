@@ -103,80 +103,165 @@ func (h *GoHook) runLinters(files []string, verbose bool) error {
 	fmt.Println("\n===== Step 3/5: Running linters =====")
 
 	if isCommandAvailable("golangci-lint") {
-		// Run linting on directories instead of individual files
-		// This ensures proper package-level analysis
-		dirs := getUniqueDirectories(files)
-		args := []string{
-			"run",
-			"--timeout=5m",
-			"--enable=gocritic",
-			"--enable=staticcheck",
-			"--enable=govet",
-			"--enable=ineffassign",
-			"--enable=unused",
-			"--enable=errcheck",
-		}
+		// Group files by their module root for proper linting context
+		moduleRoots := make(map[string][]string) // module root -> list of directories to lint
+		for _, file := range files {
+			dir := filepath.Dir(file)
 
-		// Add directory paths with ./prefix for relative paths
-		for _, dir := range dirs {
-			if !strings.HasPrefix(dir, "/") {
-				args = append(args, "./"+dir)
-			} else {
-				args = append(args, dir)
+			// Find the module root for this file
+			moduleRoot, err := findModuleRoot(dir)
+			if err != nil {
+				if verbose {
+					fmt.Printf("  Warning: Could not find module root for %s: %v\n", file, err)
+				}
+				continue
 			}
-		}
 
-		cmd := exec.Command("golangci-lint", args...)
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			// Parse output to show summary
-			lines := strings.Split(string(output), "\n")
-			var issueCount string
-			for _, line := range lines {
-				if strings.Contains(line, "issue") && strings.Contains(line, ":") {
-					issueCount = line
+			// Get absolute path for the directory to ensure consistency
+			absDir, err := filepath.Abs(dir)
+			if err != nil {
+				if verbose {
+					fmt.Printf("  Warning: Could not get absolute path for %s: %v\n", dir, err)
+				}
+				continue
+			}
+
+			// Get relative path from module root to file directory
+			relDir, err := filepath.Rel(moduleRoot, absDir)
+			if err != nil {
+				if verbose {
+					fmt.Printf("  Warning: Could not get relative path from %s to %s: %v\n", moduleRoot, absDir, err)
+				}
+				continue
+			}
+
+			if relDir == "." {
+				relDir = ""
+			}
+
+			if moduleRoots[moduleRoot] == nil {
+				moduleRoots[moduleRoot] = []string{}
+			}
+			// Avoid duplicates
+			found := false
+			for _, existing := range moduleRoots[moduleRoot] {
+				if existing == relDir {
+					found = true
+					break
 				}
 			}
+			if !found {
+				moduleRoots[moduleRoot] = append(moduleRoots[moduleRoot], relDir)
+			}
+		}
 
-			fmt.Fprintf(os.Stderr, "\n❌ Linting issues found\n")
-			if issueCount != "" {
-				fmt.Fprintf(os.Stderr, "  %s\n", issueCount)
+		hasErrors := false
+		for moduleRoot, dirs := range moduleRoots {
+			// Save current directory
+			originalDir, err := os.Getwd()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "❌ Could not get current directory: %v\n", err)
+				hasErrors = true
+				continue
+			}
+
+			// Change to module root
+			if err := os.Chdir(moduleRoot); err != nil {
+				fmt.Fprintf(os.Stderr, "❌ Could not change to module root %s: %v\n", moduleRoot, err)
+				hasErrors = true
+				continue
 			}
 
 			if verbose {
-				fmt.Fprintf(os.Stderr, "\nFull output:\n%s\n", output)
-			} else {
-				// Show first few issues with better pattern matching
-				shown := 0
-				for _, line := range lines {
-					line = strings.TrimSpace(line)
-					if line == "" {
-						continue
-					}
-					// Look for error lines (filename:line:col: error or filename:line: error)
-					if (strings.Contains(line, ".go:") && strings.Contains(line, ":")) ||
-						(strings.Contains(line, "undefined:") || strings.Contains(line, "error:") ||
-							strings.Contains(line, "warning:") || strings.Contains(line, "note:")) {
-						if shown < 5 {
-							fmt.Fprintf(os.Stderr, "  %s\n", line)
-							shown++
-						}
-					}
-				}
-				if shown == 0 {
-					// Fallback: show first non-empty lines if no standard format found
-					for _, line := range lines {
-						line = strings.TrimSpace(line)
-						if line != "" && shown < 3 {
-							fmt.Fprintf(os.Stderr, "  %s\n", line)
-							shown++
-						}
-					}
-				}
-				if shown > 0 {
-					fmt.Fprintf(os.Stderr, "  (use -v to see all issues)\n")
+				fmt.Printf("  Linting in module: %s\n", moduleRoot)
+			}
+
+			// Build arguments for golangci-lint
+			args := []string{
+				"run",
+				"--timeout=5m",
+				"--enable=gocritic",
+				"--enable=staticcheck",
+				"--enable=govet",
+				"--enable=ineffassign",
+				"--enable=unused",
+				"--enable=errcheck",
+			}
+
+			// Add directory paths
+			for _, dir := range dirs {
+				if dir == "" {
+					args = append(args, ".")
+				} else {
+					args = append(args, "./"+dir)
 				}
 			}
+
+			if verbose {
+				fmt.Printf("    Running: golangci-lint %s\n", strings.Join(args, " "))
+			}
+
+			cmd := exec.Command("golangci-lint", args...)
+			output, err := cmd.CombinedOutput()
+
+			// Restore original directory
+			if restoreErr := os.Chdir(originalDir); restoreErr != nil {
+				fmt.Fprintf(os.Stderr, "❌ Could not restore directory to %s: %v\n", originalDir, restoreErr)
+			}
+			if err != nil {
+				hasErrors = true
+				// Parse output to show summary
+				lines := strings.Split(string(output), "\n")
+				var issueCount string
+				for _, line := range lines {
+					if strings.Contains(line, "issue") && strings.Contains(line, ":") {
+						issueCount = line
+					}
+				}
+
+				fmt.Fprintf(os.Stderr, "\n❌ Linting issues found in %s\n", moduleRoot)
+				if issueCount != "" {
+					fmt.Fprintf(os.Stderr, "  %s\n", issueCount)
+				}
+
+				if verbose {
+					fmt.Fprintf(os.Stderr, "\nFull output:\n%s\n", output)
+				} else {
+					// Show first few issues with better pattern matching
+					shown := 0
+					for _, line := range lines {
+						line = strings.TrimSpace(line)
+						if line == "" {
+							continue
+						}
+						// Look for error lines (filename:line:col: error or filename:line: error)
+						if (strings.Contains(line, ".go:") && strings.Contains(line, ":")) ||
+							(strings.Contains(line, "undefined:") || strings.Contains(line, "error:") ||
+								strings.Contains(line, "warning:") || strings.Contains(line, "note:")) {
+							if shown < 5 {
+								fmt.Fprintf(os.Stderr, "  %s\n", line)
+								shown++
+							}
+						}
+					}
+					if shown == 0 {
+						// Fallback: show first non-empty lines if no standard format found
+						for _, line := range lines {
+							line = strings.TrimSpace(line)
+							if line != "" && shown < 3 {
+								fmt.Fprintf(os.Stderr, "  %s\n", line)
+								shown++
+							}
+						}
+					}
+					if shown > 0 {
+						fmt.Fprintf(os.Stderr, "  (use -v to see all issues)\n")
+					}
+				}
+			}
+		}
+
+		if hasErrors {
 			return fmt.Errorf("linting failed")
 		}
 		fmt.Println("  ✓ No linting issues")
@@ -186,13 +271,84 @@ func (h *GoHook) runLinters(files []string, verbose bool) error {
 			fmt.Println("  golangci-lint not found, using go vet")
 		}
 
-		dirs := getUniqueDirectories(files)
-		for _, dir := range dirs {
-			cmd := exec.Command("go", "vet", "./"+dir)
-			if output, err := cmd.CombinedOutput(); err != nil {
-				fmt.Fprintf(os.Stderr, "❌ go vet failed for %s:\n%s\n", dir, output)
-				return fmt.Errorf("go vet failed")
+		// Group files by module for go vet as well
+		moduleRoots := make(map[string][]string)
+		for _, file := range files {
+			dir := filepath.Dir(file)
+			moduleRoot, err := findModuleRoot(dir)
+			if err != nil {
+				if verbose {
+					fmt.Printf("  Warning: Could not find module root for %s: %v\n", file, err)
+				}
+				continue
 			}
+
+			absDir, err := filepath.Abs(dir)
+			if err != nil {
+				continue
+			}
+
+			relDir, err := filepath.Rel(moduleRoot, absDir)
+			if err != nil {
+				continue
+			}
+
+			if relDir == "." {
+				relDir = ""
+			}
+
+			if moduleRoots[moduleRoot] == nil {
+				moduleRoots[moduleRoot] = []string{}
+			}
+			found := false
+			for _, existing := range moduleRoots[moduleRoot] {
+				if existing == relDir {
+					found = true
+					break
+				}
+			}
+			if !found {
+				moduleRoots[moduleRoot] = append(moduleRoots[moduleRoot], relDir)
+			}
+		}
+
+		hasErrors := false
+		for moduleRoot, dirs := range moduleRoots {
+			originalDir, err := os.Getwd()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "❌ Could not get current directory: %v\n", err)
+				hasErrors = true
+				continue
+			}
+
+			if err := os.Chdir(moduleRoot); err != nil {
+				fmt.Fprintf(os.Stderr, "❌ Could not change to module root %s: %v\n", moduleRoot, err)
+				hasErrors = true
+				continue
+			}
+
+			for _, dir := range dirs {
+				var pkg string
+				if dir == "" {
+					pkg = "."
+				} else {
+					pkg = "./" + dir
+				}
+
+				cmd := exec.Command("go", "vet", pkg)
+				if output, err := cmd.CombinedOutput(); err != nil {
+					fmt.Fprintf(os.Stderr, "❌ go vet failed for %s in %s:\n%s\n", pkg, moduleRoot, output)
+					hasErrors = true
+				}
+			}
+
+			if restoreErr := os.Chdir(originalDir); restoreErr != nil {
+				fmt.Fprintf(os.Stderr, "❌ Could not restore directory to %s: %v\n", originalDir, restoreErr)
+			}
+		}
+
+		if hasErrors {
+			return fmt.Errorf("go vet failed")
 		}
 		fmt.Println("  ✓ go vet passed")
 	}
@@ -349,17 +505,4 @@ func (h *GoHook) runGoModTidy(verbose bool) error {
 
 	fmt.Println("  ✓ Dependencies tidied")
 	return nil
-}
-
-func getUniqueDirectories(files []string) []string {
-	dirs := make(map[string]bool)
-	for _, file := range files {
-		dirs[filepath.Dir(file)] = true
-	}
-
-	var result []string
-	for dir := range dirs {
-		result = append(result, dir)
-	}
-	return result
 }
