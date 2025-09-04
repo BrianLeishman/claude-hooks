@@ -236,7 +236,7 @@ func handlePreBashBlocking(input Input, verbose bool) {
 				output := PreToolUseOutput{
 					HookSpecificOutput: PreToolUseHookOutput{
 						HookEventName:            "PreToolUse",
-						PermissionDecision:       "ask", // Show dialog to user
+						PermissionDecision:       "deny", // Automatically block without prompting
 						PermissionDecisionReason: reason,
 					},
 				}
