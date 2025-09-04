@@ -183,60 +183,126 @@ func (h *GoHook) runLinters(files []string, verbose bool) error {
 func (h *GoHook) runTests(files []string, verbose bool) error {
 	fmt.Println("\n===== Step 4/5: Running tests =====")
 
-	// Find test files for the modified files
-	testDirs := make(map[string]bool)
+	// Find test files for the modified files and group by module root
+	moduleRoots := make(map[string][]string) // module root -> list of test directories
 	for _, file := range files {
 		dir := filepath.Dir(file)
 		base := filepath.Base(file)
 
+		var shouldTest bool
 		if strings.HasSuffix(base, "_test.go") {
-			testDirs[dir] = true
+			shouldTest = true
 		} else if strings.HasSuffix(base, ".go") {
 			// Check if corresponding test file exists
 			testFile := strings.TrimSuffix(file, ".go") + "_test.go"
 			if _, err := os.Stat(testFile); err == nil {
-				testDirs[dir] = true
+				shouldTest = true
+			}
+		}
+
+		if shouldTest {
+			// Find the module root for this directory
+			moduleRoot, err := findModuleRoot(dir)
+			if err != nil {
+				if verbose {
+					fmt.Printf("  Warning: Could not find module root for %s: %v\n", dir, err)
+				}
+				continue
+			}
+
+			// Get absolute path for the directory to ensure consistency
+			absDir, err := filepath.Abs(dir)
+			if err != nil {
+				if verbose {
+					fmt.Printf("  Warning: Could not get absolute path for %s: %v\n", dir, err)
+				}
+				continue
+			}
+
+			// Get relative path from module root to test directory
+			relDir, err := filepath.Rel(moduleRoot, absDir)
+			if err != nil {
+				if verbose {
+					fmt.Printf("  Warning: Could not get relative path from %s to %s: %v\n", moduleRoot, absDir, err)
+				}
+				continue
+			}
+
+			if relDir == "." {
+				relDir = ""
+			}
+
+			if moduleRoots[moduleRoot] == nil {
+				moduleRoots[moduleRoot] = []string{}
+			}
+			// Avoid duplicates
+			found := false
+			for _, existing := range moduleRoots[moduleRoot] {
+				if existing == relDir {
+					found = true
+					break
+				}
+			}
+			if !found {
+				moduleRoots[moduleRoot] = append(moduleRoots[moduleRoot], relDir)
 			}
 		}
 	}
 
-	if len(testDirs) == 0 {
+	if len(moduleRoots) == 0 {
 		fmt.Println("  No test files found")
 		return nil
 	}
 
 	hasFailures := false
-	for dir := range testDirs {
-		var pkg string
-		if filepath.IsAbs(dir) {
-			// For absolute paths, make them relative to working directory
-			wd, err := os.Getwd()
-			if err == nil {
-				if rel, err := filepath.Rel(wd, dir); err == nil {
-					pkg = "./" + rel
-				} else {
-					pkg = dir
-				}
-			} else {
-				pkg = dir
-			}
-		} else {
-			pkg = "./" + dir
+	for moduleRoot, testDirs := range moduleRoots {
+		// Save current directory
+		originalDir, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ Could not get current directory: %v\n", err)
+			hasFailures = true
+			continue
+		}
+
+		// Change to module root
+		if err := os.Chdir(moduleRoot); err != nil {
+			fmt.Fprintf(os.Stderr, "❌ Could not change to module root %s: %v\n", moduleRoot, err)
+			hasFailures = true
+			continue
 		}
 
 		if verbose {
-			fmt.Printf("  Testing %s\n", pkg)
+			fmt.Printf("  Testing in module: %s\n", moduleRoot)
 		}
 
-		cmd := exec.Command("go", "test", "-timeout=30s", pkg)
-		output, err := cmd.CombinedOutput()
+		// Test each directory in this module
+		for _, testDir := range testDirs {
+			var pkg string
+			if testDir == "" {
+				pkg = "."
+			} else {
+				pkg = "./" + testDir
+			}
 
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "\n❌ Tests failed in %s:\n", pkg)
-			fmt.Fprintf(os.Stderr, "%s\n", output)
-			hasFailures = true
-		} else if verbose {
-			fmt.Printf("%s", output)
+			if verbose {
+				fmt.Printf("    Testing package: %s\n", pkg)
+			}
+
+			cmd := exec.Command("go", "test", "-timeout=30s", pkg)
+			output, err := cmd.CombinedOutput()
+
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "\n❌ Tests failed in %s (module: %s):\n", pkg, moduleRoot)
+				fmt.Fprintf(os.Stderr, "%s\n", output)
+				hasFailures = true
+			} else if verbose && len(output) > 0 {
+				fmt.Printf("%s", output)
+			}
+		}
+
+		// Restore original directory
+		if err := os.Chdir(originalDir); err != nil {
+			fmt.Fprintf(os.Stderr, "❌ Could not restore directory to %s: %v\n", originalDir, err)
 		}
 	}
 
