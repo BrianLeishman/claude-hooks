@@ -26,7 +26,7 @@ Changes to hook code take effect **immediately** - no rebuild, no reinstall, no 
 
 ### 📝 **Multi-Language Support**
 - **Go**: `goimports` → `gofumpt` → `golangci-lint` → `go test` → `go mod tidy`
-- **TypeScript/JavaScript**: `prettier` → `eslint` → `tsc --noEmit`
+- **TypeScript/JavaScript**: `eslint` → `tsc --noEmit`
 - **Python**: Coming soon! 🐍
 
 ### ⚡ **Smart Processing**
@@ -104,7 +104,6 @@ make run-example-ts
 ### TypeScript/JavaScript Ecosystem  
 | Tool | Purpose | Fallback |
 |------|---------|----------|
-| `prettier` | Code formatting | Skipped if not available |
 | `eslint` | Linting with auto-fix | Skipped if not available |
 | `tsc` | Type checking | Skipped if not available |
 

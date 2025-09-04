@@ -23,17 +23,12 @@ func (h *TypeScriptHook) PostEdit(files []string, verbose bool) error {
 
 	var hasErrors bool
 
-	// Step 1: Run Prettier if available
-	if err := h.runPrettier(files, verbose); err != nil {
-		fmt.Fprintf(os.Stderr, "⚠️  prettier: %v\n", err)
-	}
-
-	// Step 2: Run ESLint
+	// Step 1: Run ESLint
 	if err := h.runESLint(files, verbose); err != nil {
 		hasErrors = true
 	}
 
-	// Step 3: Run TypeScript compiler check
+	// Step 2: Run TypeScript compiler check
 	if err := h.runTypeCheck(files, verbose); err != nil {
 		hasErrors = true
 	}
@@ -41,26 +36,6 @@ func (h *TypeScriptHook) PostEdit(files []string, verbose bool) error {
 	if hasErrors {
 		return fmt.Errorf("checks failed")
 	}
-	return nil
-}
-
-func (h *TypeScriptHook) runPrettier(files []string, verbose bool) error {
-	if !isCommandAvailable("prettier") {
-		if verbose {
-			fmt.Println("prettier not found, skipping")
-		}
-		return nil
-	}
-
-	fmt.Println("\n===== Step 1/3: Running Prettier =====")
-	args := append([]string{"--write"}, files...)
-	cmd := exec.Command("prettier", args...)
-
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("prettier failed: %v\n%s", err, output)
-	}
-
-	fmt.Println("  ✓ Formatting complete")
 	return nil
 }
 
@@ -72,7 +47,7 @@ func (h *TypeScriptHook) runESLint(files []string, verbose bool) error {
 		return nil
 	}
 
-	fmt.Println("\n===== Step 2/3: Running ESLint =====")
+	fmt.Println("\n===== Step 1/2: Running ESLint =====")
 	args := append([]string{"--fix"}, files...)
 	cmd := exec.Command("eslint", args...)
 
@@ -98,7 +73,7 @@ func (h *TypeScriptHook) runTypeCheck(files []string, verbose bool) error {
 		return nil
 	}
 
-	fmt.Println("\n===== Step 3/3: Running TypeScript type check =====")
+	fmt.Println("\n===== Step 2/2: Running TypeScript type check =====")
 	cmd := exec.Command("tsc", "--noEmit")
 
 	output, err := cmd.CombinedOutput()

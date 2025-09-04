@@ -61,9 +61,8 @@ File types are determined by extension and mapped to hooks in `internal/hooks/ho
 5. **go mod tidy**: Dependency management
 
 ### TypeScript Hook Pipeline
-1. **prettier**: Code formatting
-2. **eslint**: Linting with auto-fix
-3. **tsc --noEmit**: Type checking
+1. **eslint**: Linting with auto-fix
+2. **tsc --noEmit**: Type checking
 
 ## Integration with Claude Code
 
