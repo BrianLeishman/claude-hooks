@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 type TypeScriptHook struct{}
@@ -22,19 +23,22 @@ func (h *TypeScriptHook) PostEdit(files []string, verbose bool) error {
 	fmt.Println("==========================================")
 
 	var hasErrors bool
+	var allErrors []string
 
 	// Step 1: Run ESLint
 	if err := h.runESLint(files, verbose); err != nil {
+		allErrors = append(allErrors, err.Error())
 		hasErrors = true
 	}
 
 	// Step 2: Run TypeScript compiler check
 	if err := h.runTypeCheck(files, verbose); err != nil {
+		allErrors = append(allErrors, err.Error())
 		hasErrors = true
 	}
 
 	if hasErrors {
-		return fmt.Errorf("checks failed")
+		return fmt.Errorf("TypeScript/JavaScript checks failed:\n\n%s", strings.Join(allErrors, "\n\n"))
 	}
 	return nil
 }
@@ -53,8 +57,18 @@ func (h *TypeScriptHook) runESLint(files []string, verbose bool) error {
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		outputStr := strings.TrimSpace(string(output))
 		fmt.Fprintf(os.Stderr, "❌ ESLint found issues:\n%s\n", output)
-		return fmt.Errorf("eslint failed")
+
+		// Return detailed error information for Claude
+		if outputStr != "" {
+			// Limit output length to avoid overwhelming Claude
+			if len(outputStr) > 1500 {
+				outputStr = outputStr[:1500] + "\n... (output truncated, use verbose mode to see all issues)"
+			}
+			return fmt.Errorf("ESLint found issues:\n%s", outputStr)
+		}
+		return fmt.Errorf("ESLint failed with unknown errors")
 	}
 
 	if verbose && len(output) > 0 {
@@ -78,8 +92,18 @@ func (h *TypeScriptHook) runTypeCheck(files []string, verbose bool) error {
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		outputStr := strings.TrimSpace(string(output))
 		fmt.Fprintf(os.Stderr, "❌ Type errors found:\n%s\n", output)
-		return fmt.Errorf("type check failed")
+
+		// Return detailed error information for Claude
+		if outputStr != "" {
+			// Limit output length to avoid overwhelming Claude
+			if len(outputStr) > 1500 {
+				outputStr = outputStr[:1500] + "\n... (output truncated, use verbose mode to see all issues)"
+			}
+			return fmt.Errorf("TypeScript type check failed:\n%s", outputStr)
+		}
+		return fmt.Errorf("TypeScript type check failed with unknown errors")
 	}
 
 	if verbose && len(output) > 0 {

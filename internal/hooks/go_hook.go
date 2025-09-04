@@ -25,6 +25,7 @@ func (h *GoHook) PostEdit(files []string, verbose bool) error {
 	fmt.Println("==========================================")
 
 	var hasErrors bool
+	var allErrors []string
 
 	// Step 1: Run goimports
 	if err := h.runGoimports(files, verbose); err != nil {
@@ -41,11 +42,13 @@ func (h *GoHook) PostEdit(files []string, verbose bool) error {
 
 	// Step 3: Run linters
 	if err := h.runLinters(files, verbose); err != nil {
+		allErrors = append(allErrors, err.Error())
 		hasErrors = true
 	}
 
 	// Step 4: Run tests for modified files
 	if err := h.runTests(files, verbose); err != nil {
+		allErrors = append(allErrors, err.Error())
 		hasErrors = true
 	}
 
@@ -57,7 +60,7 @@ func (h *GoHook) PostEdit(files []string, verbose bool) error {
 	}
 
 	if hasErrors {
-		return fmt.Errorf("checks failed")
+		return fmt.Errorf("Go checks failed:\n\n%s", strings.Join(allErrors, "\n\n"))
 	}
 	return nil
 }
@@ -156,6 +159,8 @@ func (h *GoHook) runLinters(files []string, verbose bool) error {
 		}
 
 		hasErrors := false
+		var allErrorLines []string
+
 		for moduleRoot, dirs := range moduleRoots {
 			// Save current directory
 			originalDir, err := os.Getwd()
@@ -210,12 +215,40 @@ func (h *GoHook) runLinters(files []string, verbose bool) error {
 			}
 			if err != nil {
 				hasErrors = true
-				// Parse output to show summary
+				// Parse output to collect error lines for Claude
 				lines := strings.Split(string(output), "\n")
 				var issueCount string
+				var errorLines []string
+
 				for _, line := range lines {
+					line = strings.TrimSpace(line)
+					if line == "" {
+						continue
+					}
+
 					if strings.Contains(line, "issue") && strings.Contains(line, ":") {
 						issueCount = line
+					}
+
+					// Collect actual error lines - updated pattern to match golangci-lint output
+					if strings.Contains(line, ".go:") && strings.Contains(line, ":") {
+						errorLines = append(errorLines, line)
+					} else if strings.Contains(line, "undefined:") || strings.Contains(line, "error:") ||
+						strings.Contains(line, "warning:") || strings.Contains(line, "note:") {
+						errorLines = append(errorLines, line)
+					}
+				}
+
+				// Add error lines to the collection for Claude
+				if len(errorLines) > 0 {
+					allErrorLines = append(allErrorLines, fmt.Sprintf("Linting issues in %s:", moduleRoot))
+					// Limit to first 10 issues to avoid overwhelming Claude
+					limit := 10
+					if len(errorLines) > limit {
+						allErrorLines = append(allErrorLines, errorLines[:limit]...)
+						allErrorLines = append(allErrorLines, fmt.Sprintf("... and %d more issues", len(errorLines)-limit))
+					} else {
+						allErrorLines = append(allErrorLines, errorLines...)
 					}
 				}
 
@@ -227,24 +260,15 @@ func (h *GoHook) runLinters(files []string, verbose bool) error {
 				if verbose {
 					fmt.Fprintf(os.Stderr, "\nFull output:\n%s\n", output)
 				} else {
-					// Show first few issues with better pattern matching
+					// Show first few issues
 					shown := 0
-					for _, line := range lines {
-						line = strings.TrimSpace(line)
-						if line == "" {
-							continue
-						}
-						// Look for error lines (filename:line:col: error or filename:line: error)
-						if (strings.Contains(line, ".go:") && strings.Contains(line, ":")) ||
-							(strings.Contains(line, "undefined:") || strings.Contains(line, "error:") ||
-								strings.Contains(line, "warning:") || strings.Contains(line, "note:")) {
-							if shown < 5 {
-								fmt.Fprintf(os.Stderr, "  %s\n", line)
-								shown++
-							}
+					for _, line := range errorLines {
+						if shown < 5 {
+							fmt.Fprintf(os.Stderr, "  %s\n", line)
+							shown++
 						}
 					}
-					if shown == 0 {
+					if len(errorLines) == 0 {
 						// Fallback: show first non-empty lines if no standard format found
 						for _, line := range lines {
 							line = strings.TrimSpace(line)
@@ -262,6 +286,9 @@ func (h *GoHook) runLinters(files []string, verbose bool) error {
 		}
 
 		if hasErrors {
+			if len(allErrorLines) > 0 {
+				return fmt.Errorf("linting failed:\n\n%s", strings.Join(allErrorLines, "\n"))
+			}
 			return fmt.Errorf("linting failed")
 		}
 		fmt.Println("  ✓ No linting issues")
@@ -430,6 +457,8 @@ func (h *GoHook) runTests(files []string, verbose bool) error {
 	}
 
 	hasFailures := false
+	var allTestErrors []string
+
 	for moduleRoot, testDirs := range moduleRoots {
 		// Save current directory
 		originalDir, err := os.Getwd()
@@ -467,6 +496,18 @@ func (h *GoHook) runTests(files []string, verbose bool) error {
 			output, err := cmd.CombinedOutput()
 
 			if err != nil {
+				// Collect test failure details for Claude
+				testError := fmt.Sprintf("Tests failed in %s (module: %s):", pkg, moduleRoot)
+				outputStr := strings.TrimSpace(string(output))
+				if outputStr != "" {
+					// Limit output length to avoid overwhelming Claude
+					if len(outputStr) > 1000 {
+						outputStr = outputStr[:1000] + "\n... (output truncated)"
+					}
+					testError = fmt.Sprintf("%s\n%s", testError, outputStr)
+				}
+				allTestErrors = append(allTestErrors, testError)
+
 				fmt.Fprintf(os.Stderr, "\n❌ Tests failed in %s (module: %s):\n", pkg, moduleRoot)
 				fmt.Fprintf(os.Stderr, "%s\n", output)
 				hasFailures = true
@@ -482,6 +523,9 @@ func (h *GoHook) runTests(files []string, verbose bool) error {
 	}
 
 	if hasFailures {
+		if len(allTestErrors) > 0 {
+			return fmt.Errorf("tests failed:\n\n%s", strings.Join(allTestErrors, "\n\n"))
+		}
 		return fmt.Errorf("tests failed")
 	}
 

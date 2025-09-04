@@ -25,6 +25,12 @@ type Input struct {
 	ToolInput ToolInput `json:"tool_input"`
 }
 
+// HookOutput represents the JSON response for PostToolUse hooks
+type HookOutput struct {
+	Decision string `json:"decision,omitempty"` // "block" to notify Claude of issues
+	Reason   string `json:"reason,omitempty"`   // Detailed explanation for Claude
+}
+
 func main() {
 	// Parse command-line flags
 	var (
@@ -67,6 +73,8 @@ func main() {
 	filesByType := groupFilesByType(files)
 
 	hasErrors := false
+	var errorMessages []string
+
 	for fileType, fileList := range filesByType {
 		if *verbose {
 			fmt.Printf("Processing %d %s files...\n", len(fileList), fileType)
@@ -93,13 +101,32 @@ func main() {
 		}
 
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "❌ %s hook failed: %v\n", fileType, err)
+			errorMsg := fmt.Sprintf("%s hook failed: %v", fileType, err)
+			fmt.Fprintf(os.Stderr, "❌ %s\n", errorMsg)
+			errorMessages = append(errorMessages, errorMsg)
 			hasErrors = true
 		}
 	}
 
 	if hasErrors {
-		os.Exit(2) // Exit code 2 makes it blocking in Claude Code
+		// For PostToolUse hooks, output JSON to communicate with Claude
+		if *hookType == "post-edit" {
+			output := HookOutput{
+				Decision: "block",
+				Reason:   strings.Join(errorMessages, "\n\n"),
+			}
+
+			jsonOutput, err := json.Marshal(output)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to marshal JSON output: %v\n", err)
+				os.Exit(2)
+			}
+
+			fmt.Println(string(jsonOutput))
+			os.Exit(0) // Exit with 0 when using JSON output
+		} else {
+			os.Exit(2) // Use exit code 2 for non-PostToolUse hooks
+		}
 	}
 
 	fmt.Println("✅ All checks passed!")
