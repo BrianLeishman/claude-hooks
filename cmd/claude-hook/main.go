@@ -209,26 +209,31 @@ func handlePreBashBlocking(input Input, verbose bool) {
 		os.Exit(0)
 	}
 
-	// Check for MySQL/MariaDB commands by parsing the actual executable
-	// Split command to get the first word (the actual command being executed)
-	parts := strings.Fields(command)
-	if len(parts) > 0 {
-		executable := strings.ToLower(filepath.Base(parts[0]))
+	// Check for MySQL/MariaDB commands in compound commands
+	// Split by common shell operators to check all sub-commands
+	subCommands := parseCompoundCommand(command)
 
-		// Check if the executable itself is a MySQL/MariaDB command
-		if executable == "mysql" || executable == "mysqldump" || executable == "mariadb" {
-			fmt.Fprintf(os.Stderr, "❌ BLOCKED: MySQL commands are not allowed\n")
-			fmt.Fprintf(os.Stderr, "\n")
-			fmt.Fprintf(os.Stderr, "You attempted to run: %s\n", command)
-			fmt.Fprintf(os.Stderr, "\n")
-			fmt.Fprintf(os.Stderr, "Please use the Go database connection methods instead.\n")
-			fmt.Fprintf(os.Stderr, "The codebase already has database access configured through Go.\n")
-			fmt.Fprintf(os.Stderr, "\n")
-			fmt.Fprintf(os.Stderr, "Alternatives:\n")
-			fmt.Fprintf(os.Stderr, "- Check existing Go code for database queries\n")
-			fmt.Fprintf(os.Stderr, "- Look at the model definitions in the codebase\n")
-			fmt.Fprintf(os.Stderr, "- Read the existing test files for schema information\n")
-			os.Exit(2)
+	for _, subCmd := range subCommands {
+		parts := strings.Fields(strings.TrimSpace(subCmd))
+		if len(parts) > 0 {
+			executable := strings.ToLower(filepath.Base(parts[0]))
+
+			// Check if the executable itself is a MySQL/MariaDB command
+			if executable == "mysql" || executable == "mysqldump" || executable == "mariadb" {
+				fmt.Fprintf(os.Stderr, "❌ BLOCKED: MySQL commands are not allowed\n")
+				fmt.Fprintf(os.Stderr, "\n")
+				fmt.Fprintf(os.Stderr, "You attempted to run: %s\n", command)
+				fmt.Fprintf(os.Stderr, "Detected MySQL command in: %s\n", subCmd)
+				fmt.Fprintf(os.Stderr, "\n")
+				fmt.Fprintf(os.Stderr, "Please use the Go database connection methods instead.\n")
+				fmt.Fprintf(os.Stderr, "The codebase already has database access configured through Go.\n")
+				fmt.Fprintf(os.Stderr, "\n")
+				fmt.Fprintf(os.Stderr, "Alternatives:\n")
+				fmt.Fprintf(os.Stderr, "- Check existing Go code for database queries\n")
+				fmt.Fprintf(os.Stderr, "- Look at the model definitions in the codebase\n")
+				fmt.Fprintf(os.Stderr, "- Read the existing test files for schema information\n")
+				os.Exit(2)
+			}
 		}
 	}
 
@@ -238,4 +243,68 @@ func handlePreBashBlocking(input Input, verbose bool) {
 
 	// Command is allowed
 	os.Exit(0)
+}
+
+// parseCompoundCommand splits a shell command by common operators to extract sub-commands
+func parseCompoundCommand(command string) []string {
+	// Replace shell operators with a delimiter we can split on
+	// Handle &&, ||, ;, and | (pipe)
+	delim := "||SPLIT||"
+
+	// Replace operators with our delimiter
+	command = strings.ReplaceAll(command, "&&", delim)
+	command = strings.ReplaceAll(command, "||", delim)
+	command = strings.ReplaceAll(command, ";", delim)
+
+	// Handle pipes - but be careful not to break quoted strings
+	// Simple approach: split on | only if not inside quotes
+	command = splitPipes(command, delim)
+
+	// Split by our delimiter and clean up
+	parts := strings.Split(command, delim)
+	var subCommands []string
+
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			subCommands = append(subCommands, trimmed)
+		}
+	}
+
+	return subCommands
+}
+
+// splitPipes replaces pipes with delimiter, avoiding pipes inside quotes
+func splitPipes(command, delim string) string {
+	var result strings.Builder
+	inQuotes := false
+	var quoteChar rune
+
+	for i, char := range command {
+		switch char {
+		case '"', '\'', '`':
+			if !inQuotes {
+				inQuotes = true
+				quoteChar = char
+			} else if char == quoteChar {
+				inQuotes = false
+			}
+			result.WriteRune(char)
+		case '|':
+			if !inQuotes {
+				// Check if it's not part of ||
+				if i+1 < len(command) && rune(command[i+1]) == '|' {
+					result.WriteRune(char) // Let || be handled by the main replacement
+				} else {
+					result.WriteString(delim)
+				}
+			} else {
+				result.WriteRune(char)
+			}
+		default:
+			result.WriteRune(char)
+		}
+	}
+
+	return result.String()
 }
