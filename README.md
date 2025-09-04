@@ -1,6 +1,6 @@
 # 🪝 Claude Hooks
 
-[![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=for-the-badge&logo=go)](https://golang.org)
+[![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?style=for-the-badge&logo=go)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude-Code-FF6B35?style=for-the-badge)](https://claude.ai/code)
 
@@ -61,7 +61,7 @@ When Claude Code edits your files, hooks automatically run in sequence:
 ## 🏁 Quick Start
 
 ### Prerequisites
-- [Go 1.21+](https://golang.org/dl/)
+- [Go 1.25+](https://golang.org/dl/)
 - [Claude Code](https://claude.ai/code)
 
 ### Installation
