@@ -146,12 +146,31 @@ func (h *GoHook) runLinters(files []string, verbose bool) error {
 			if verbose {
 				fmt.Fprintf(os.Stderr, "\nFull output:\n%s\n", output)
 			} else {
-				// Show first few issues
+				// Show first few issues with better pattern matching
 				shown := 0
 				for _, line := range lines {
-					if strings.Contains(line, ".go:") && shown < 5 {
-						fmt.Fprintf(os.Stderr, "  %s\n", line)
-						shown++
+					line = strings.TrimSpace(line)
+					if line == "" {
+						continue
+					}
+					// Look for error lines (filename:line:col: error or filename:line: error)
+					if (strings.Contains(line, ".go:") && strings.Contains(line, ":")) ||
+						(strings.Contains(line, "undefined:") || strings.Contains(line, "error:") ||
+							strings.Contains(line, "warning:") || strings.Contains(line, "note:")) {
+						if shown < 5 {
+							fmt.Fprintf(os.Stderr, "  %s\n", line)
+							shown++
+						}
+					}
+				}
+				if shown == 0 {
+					// Fallback: show first non-empty lines if no standard format found
+					for _, line := range lines {
+						line = strings.TrimSpace(line)
+						if line != "" && shown < 3 {
+							fmt.Fprintf(os.Stderr, "  %s\n", line)
+							shown++
+						}
 					}
 				}
 				if shown > 0 {
