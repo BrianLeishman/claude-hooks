@@ -122,6 +122,13 @@ func (h *GoHook) runLinters(files []string, verbose bool) error {
 	fmt.Println("\n===== Step 3/5: Running linters =====")
 
 	if isCommandAvailable("golangci-lint") {
+		// Create a map of edited files for filtering
+		editedFiles := make(map[string]bool)
+		for _, file := range files {
+			// Get just the filename without path for matching
+			editedFiles[filepath.Base(file)] = true
+		}
+
 		// Group files by their module root for proper linting context
 		moduleRoots := make(map[string][]string) // module root -> list of directories to lint
 		for _, file := range files {
@@ -230,10 +237,8 @@ func (h *GoHook) runLinters(files []string, verbose bool) error {
 				fmt.Fprintf(os.Stderr, "❌ Could not restore directory to %s: %v\n", originalDir, restoreErr)
 			}
 			if err != nil {
-				hasErrors = true
-				// Parse output to collect error lines for Claude
+				// Parse output to collect error lines for Claude (only for edited files)
 				lines := strings.Split(string(output), "\n")
-				var issueCount string
 				var errorLines []string
 
 				for _, line := range lines {
@@ -242,22 +247,26 @@ func (h *GoHook) runLinters(files []string, verbose bool) error {
 						continue
 					}
 
-					if strings.Contains(line, "issue") && strings.Contains(line, ":") {
-						issueCount = line
-					}
-
-					// Collect actual error lines - updated pattern to match golangci-lint output
+					// Collect actual error lines - filter to only edited files
 					if strings.Contains(line, ".go:") && strings.Contains(line, ":") {
-						errorLines = append(errorLines, line)
+						// Extract filename from error line (format: "filename.go:line:col: message")
+						if colonPos := strings.Index(line, ":"); colonPos != -1 {
+							filename := line[:colonPos]
+							if editedFiles[filename] {
+								errorLines = append(errorLines, line)
+							}
+						}
 					} else if strings.Contains(line, "undefined:") || strings.Contains(line, "error:") ||
 						strings.Contains(line, "warning:") || strings.Contains(line, "note:") {
+						// These error types don't have a filename prefix, so we include them all
 						errorLines = append(errorLines, line)
 					}
 				}
 
-				// Add error lines to the collection for Claude
+				// Add error lines to the collection for Claude (only for edited files)
 				if len(errorLines) > 0 {
-					allErrorLines = append(allErrorLines, fmt.Sprintf("Linting issues in %s:", moduleRoot))
+					hasErrors = true
+					allErrorLines = append(allErrorLines, fmt.Sprintf("Linting issues in edited files from %s:", moduleRoot))
 					// Limit to first 10 issues to avoid overwhelming Claude
 					limit := 10
 					if len(errorLines) > limit {
@@ -268,9 +277,11 @@ func (h *GoHook) runLinters(files []string, verbose bool) error {
 					}
 				}
 
-				fmt.Fprintf(os.Stderr, "\n❌ Linting issues found in %s\n", moduleRoot)
-				if issueCount != "" {
-					fmt.Fprintf(os.Stderr, "  %s\n", issueCount)
+				if len(errorLines) > 0 {
+					fmt.Fprintf(os.Stderr, "\n❌ Linting issues found in edited files from %s\n", moduleRoot)
+					fmt.Fprintf(os.Stderr, "  %d issues in edited files\n", len(errorLines))
+				} else {
+					fmt.Fprintf(os.Stderr, "\n✓ No linting issues found in edited files from %s\n", moduleRoot)
 				}
 
 				if verbose {
@@ -284,16 +295,7 @@ func (h *GoHook) runLinters(files []string, verbose bool) error {
 							shown++
 						}
 					}
-					if len(errorLines) == 0 {
-						// Fallback: show first non-empty lines if no standard format found
-						for _, line := range lines {
-							line = strings.TrimSpace(line)
-							if line != "" && shown < 3 {
-								fmt.Fprintf(os.Stderr, "  %s\n", line)
-								shown++
-							}
-						}
-					}
+					// No fallback needed - we already have proper success/error messages
 					if shown > 0 {
 						fmt.Fprintf(os.Stderr, "  (use -v to see all issues)\n")
 					}
