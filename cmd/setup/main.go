@@ -83,7 +83,7 @@ func main() {
 	fmt.Printf("Hooks configured in: %s\n", settingsPath)
 	fmt.Println("  PostToolUse Event: Write|Edit|MultiEdit")
 	fmt.Printf("    Command: %s\n", postHookCommand)
-	fmt.Println("  PreToolUse Event: Bash (MySQL blocking)")
+	fmt.Println("  PreToolUse Event: Bash (MySQL blocking + git commit protection)")
 	fmt.Printf("    Command: %s\n", preHookCommand)
 	fmt.Println("")
 	fmt.Println("🔄 Live reloading enabled - changes to hook code take effect immediately!")
@@ -95,6 +95,8 @@ func main() {
 	fmt.Println("  - Tidy go.mod")
 	fmt.Println("  - Format TypeScript/JavaScript (prettier, eslint)")
 	fmt.Println("  - Type-check TypeScript files")
+	fmt.Println("  - Block MySQL commands (use Go database methods instead)")
+	fmt.Println("  - Block git commits on master/main branches (create feature branches instead)")
 }
 
 func readOrCreateSettings(settingsPath string) (*ClaudeSettings, error) {

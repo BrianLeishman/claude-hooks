@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/brianleishman/claude-hooks/internal/hooks"
@@ -40,6 +42,33 @@ type PreToolUseHookOutput struct {
 	HookEventName            string `json:"hookEventName"`
 	PermissionDecision       string `json:"permissionDecision"` // "allow", "deny", or "ask"
 	PermissionDecisionReason string `json:"permissionDecisionReason"`
+}
+
+// getCurrentBranch returns the current git branch name, or empty string if not in a git repo
+func getCurrentBranch() string {
+	cmd := exec.Command("git", "branch", "--show-current")
+	output, err := cmd.Output()
+	if err != nil {
+		// Try alternative method for older git versions or detached HEAD
+		cmd = exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+		output, err = cmd.Output()
+		if err != nil {
+			return "" // Not in a git repo or other error
+		}
+	}
+
+	branch := strings.TrimSpace(string(output))
+	// Handle detached HEAD case
+	if branch == "HEAD" {
+		return ""
+	}
+	return branch
+}
+
+// isProtectedBranch checks if the given branch is protected from direct commits
+func isProtectedBranch(branch string) bool {
+	protectedBranches := []string{"master", "main"}
+	return slices.Contains(protectedBranches, branch)
 }
 
 func main() {
@@ -265,6 +294,52 @@ func handlePreBashBlocking(input Input, verbose bool) {
 				fmt.Fprintf(os.Stderr, "- Read the existing test files for schema information\n")
 
 				os.Exit(0) // Exit successfully since we provided JSON
+			}
+
+			// Check if the command is a git commit on a protected branch
+			if executable == "git" && len(parts) >= 2 && parts[1] == "commit" {
+				currentBranch := getCurrentBranch()
+				if currentBranch != "" && isProtectedBranch(currentBranch) {
+					reason := fmt.Sprintf("Direct commits to the '%s' branch are not allowed. You attempted to run: %s\n\nDetected git commit command in: %s\n\nPlease create a feature branch instead:\n\n1. Create and switch to a new branch:\n   git checkout -b feature/your-feature-name\n\n2. Make your commits on the feature branch:\n   git commit -m \"your commit message\"\n\n3. Push the feature branch:\n   git push -u origin feature/your-feature-name\n\n4. Create a pull request to merge into %s", currentBranch, command, subCmd, currentBranch)
+
+					output := PreToolUseOutput{
+						HookSpecificOutput: PreToolUseHookOutput{
+							HookEventName:            "PreToolUse",
+							PermissionDecision:       "deny", // Automatically block without prompting
+							PermissionDecisionReason: reason,
+						},
+					}
+
+					jsonOutput, err := json.Marshal(output)
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "Failed to marshal JSON output: %v\n", err)
+						os.Exit(1)
+					}
+
+					// Output JSON to stdout for Claude
+					fmt.Println(string(jsonOutput))
+
+					// Also output user-friendly message to stderr
+					fmt.Fprintf(os.Stderr, "❌ BLOCKED: Direct commits to '%s' branch are not allowed\n", currentBranch)
+					fmt.Fprintf(os.Stderr, "\n")
+					fmt.Fprintf(os.Stderr, "You attempted to run: %s\n", command)
+					fmt.Fprintf(os.Stderr, "Detected git commit in: %s\n", subCmd)
+					fmt.Fprintf(os.Stderr, "\n")
+					fmt.Fprintf(os.Stderr, "Please create a feature branch instead:\n")
+					fmt.Fprintf(os.Stderr, "\n")
+					fmt.Fprintf(os.Stderr, "1. Create and switch to a new branch:\n")
+					fmt.Fprintf(os.Stderr, "   git checkout -b feature/your-feature-name\n")
+					fmt.Fprintf(os.Stderr, "\n")
+					fmt.Fprintf(os.Stderr, "2. Make your commits on the feature branch:\n")
+					fmt.Fprintf(os.Stderr, "   git commit -m \"your commit message\"\n")
+					fmt.Fprintf(os.Stderr, "\n")
+					fmt.Fprintf(os.Stderr, "3. Push the feature branch:\n")
+					fmt.Fprintf(os.Stderr, "   git push -u origin feature/your-feature-name\n")
+					fmt.Fprintf(os.Stderr, "\n")
+					fmt.Fprintf(os.Stderr, "4. Create a pull request to merge into %s\n", currentBranch)
+
+					os.Exit(0) // Exit successfully since we provided JSON
+				}
 			}
 		}
 	}
