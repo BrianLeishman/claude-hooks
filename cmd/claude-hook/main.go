@@ -45,23 +45,60 @@ type PreToolUseHookOutput struct {
 }
 
 // getCurrentBranch returns the current git branch name, or empty string if not in a git repo
-func getCurrentBranch() string {
-	cmd := exec.Command("git", "branch", "--show-current")
+// workingDir specifies which directory to check (empty string uses current directory)
+func getCurrentBranch(workingDir string, verbose bool) string {
+	if verbose {
+		if workingDir != "" {
+			fmt.Fprintf(os.Stderr, "🔍 Detecting git branch in directory: %s\n", workingDir)
+		} else {
+			fmt.Fprintf(os.Stderr, "🔍 Detecting current git branch...\n")
+		}
+	}
+
+	var cmd *exec.Cmd
+	if workingDir != "" {
+		cmd = exec.Command("git", "-C", workingDir, "branch", "--show-current")
+	} else {
+		cmd = exec.Command("git", "branch", "--show-current")
+	}
+
 	output, err := cmd.Output()
 	if err != nil {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "🔍 First method failed (%v), trying fallback...\n", err)
+		}
 		// Try alternative method for older git versions or detached HEAD
-		cmd = exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+		if workingDir != "" {
+			cmd = exec.Command("git", "-C", workingDir, "rev-parse", "--abbrev-ref", "HEAD")
+		} else {
+			cmd = exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+		}
 		output, err = cmd.Output()
 		if err != nil {
+			if verbose {
+				fmt.Fprintf(os.Stderr, "🔍 Fallback method also failed (%v), not in git repo\n", err)
+			}
 			return "" // Not in a git repo or other error
 		}
 	}
 
 	branch := strings.TrimSpace(string(output))
+	if verbose {
+		fmt.Fprintf(os.Stderr, "🔍 Raw branch output: %q\n", branch)
+	}
+
 	// Handle detached HEAD case
 	if branch == "HEAD" {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "🔍 Detected detached HEAD state\n")
+		}
 		return ""
 	}
+
+	if verbose {
+		fmt.Fprintf(os.Stderr, "🔍 Current branch: %q\n", branch)
+	}
+
 	return branch
 }
 
@@ -69,6 +106,82 @@ func getCurrentBranch() string {
 func isProtectedBranch(branch string) bool {
 	protectedBranches := []string{"master", "main"}
 	return slices.Contains(protectedBranches, branch)
+}
+
+// getTargetWorkingDirectory determines the target project directory from available context
+// Returns empty string if we can't confidently determine the target directory
+func getTargetWorkingDirectory(input Input, verbose bool) string {
+	// Option 1: Check for CLAUDE_CODE_CWD environment variable
+	if claudeDir := os.Getenv("CLAUDE_CODE_CWD"); claudeDir != "" {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "🔍 Using working directory from CLAUDE_CODE_CWD: %s\n", claudeDir)
+		}
+		return claudeDir
+	}
+
+	// Option 2: Infer from file paths (most reliable)
+	files := collectFiles(input.ToolInput)
+	if len(files) > 0 {
+		// Find the git repository root for any file
+		for _, file := range files {
+			if dir := findGitRoot(file, verbose); dir != "" {
+				if verbose {
+					fmt.Fprintf(os.Stderr, "🔍 Inferred working directory from file path: %s\n", dir)
+				}
+				return dir
+			}
+		}
+	}
+
+	// Option 3: Smart fallback - only use current directory if it seems reasonable
+	if cwd, err := os.Getwd(); err == nil {
+		// Check if we're running from the claude-hooks directory
+		if strings.Contains(cwd, "claude-hooks") {
+			if verbose {
+				fmt.Fprintf(os.Stderr, "🚫 Skipping branch protection - running from claude-hooks directory without file context\n")
+				fmt.Fprintf(os.Stderr, "   This prevents false positives when the hook can't determine the target project\n")
+			}
+			return "" // Return empty to skip protection
+		}
+
+		if verbose {
+			fmt.Fprintf(os.Stderr, "🔍 Using current working directory as fallback: %s\n", cwd)
+		}
+		return cwd
+	}
+
+	if verbose {
+		fmt.Fprintf(os.Stderr, "🔍 Could not determine target working directory\n")
+	}
+	return ""
+}
+
+// findGitRoot finds the git repository root for a given file path
+func findGitRoot(filePath string, verbose bool) string {
+	dir := filepath.Dir(filePath)
+
+	// Walk up the directory tree looking for .git
+	for {
+		gitDir := filepath.Join(dir, ".git")
+		if _, err := os.Stat(gitDir); err == nil {
+			if verbose {
+				fmt.Fprintf(os.Stderr, "🔍 Found git root at: %s\n", dir)
+			}
+			return dir
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// Reached the root directory
+			break
+		}
+		dir = parent
+	}
+
+	if verbose {
+		fmt.Fprintf(os.Stderr, "🔍 No git root found for file: %s\n", filePath)
+	}
+	return ""
 }
 
 func main() {
@@ -298,8 +411,31 @@ func handlePreBashBlocking(input Input, verbose bool) {
 
 			// Check if the command is a git commit on a protected branch
 			if executable == "git" && len(parts) >= 2 && parts[1] == "commit" {
-				currentBranch := getCurrentBranch()
+				if verbose {
+					fmt.Fprintf(os.Stderr, "🔍 Detected git commit command, checking branch protection...\n")
+				}
+
+				// Determine the target working directory for git branch check
+				targetDir := getTargetWorkingDirectory(input, verbose)
+
+				// Skip protection if we can't confidently determine the target directory
+				if targetDir == "" {
+					if verbose {
+						fmt.Fprintf(os.Stderr, "✅ Skipping branch protection check - cannot determine target project directory\n")
+					}
+					// Allow the command to proceed by continuing to next subcommand
+					continue
+				}
+
+				currentBranch := getCurrentBranch(targetDir, verbose)
+
+				if verbose {
+					fmt.Fprintf(os.Stderr, "🔍 Checking if branch %q is protected...\n", currentBranch)
+				}
 				if currentBranch != "" && isProtectedBranch(currentBranch) {
+					if verbose {
+						fmt.Fprintf(os.Stderr, "🚫 Branch %q is protected - blocking commit\n", currentBranch)
+					}
 					reason := fmt.Sprintf("Direct commits to the '%s' branch are not allowed. You attempted to run: %s\n\nDetected git commit command in: %s\n\nPlease create a feature branch instead:\n\n1. Create and switch to a new branch:\n   git checkout -b feature/your-feature-name\n\n2. Make your commits on the feature branch:\n   git commit -m \"your commit message\"\n\n3. Push the feature branch:\n   git push -u origin feature/your-feature-name\n\n4. Create a pull request to merge into %s", currentBranch, command, subCmd, currentBranch)
 
 					output := PreToolUseOutput{
@@ -339,6 +475,12 @@ func handlePreBashBlocking(input Input, verbose bool) {
 					fmt.Fprintf(os.Stderr, "4. Create a pull request to merge into %s\n", currentBranch)
 
 					os.Exit(0) // Exit successfully since we provided JSON
+				} else if verbose {
+					if currentBranch == "" {
+						fmt.Fprintf(os.Stderr, "✅ Not in a git repo or detached HEAD - allowing commit\n")
+					} else {
+						fmt.Fprintf(os.Stderr, "✅ Branch %q is not protected - allowing commit\n", currentBranch)
+					}
 				}
 			}
 		}
