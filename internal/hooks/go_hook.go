@@ -518,10 +518,6 @@ func (h *GoHook) runTests(files []string, verbose bool) error {
 				testError := fmt.Sprintf("Tests failed in %s (module: %s):", pkg, moduleRoot)
 				outputStr := strings.TrimSpace(string(output))
 				if outputStr != "" {
-					// Limit output length to avoid overwhelming Claude
-					if len(outputStr) > 1000 {
-						outputStr = outputStr[:1000] + "\n... (output truncated)"
-					}
 					testError = fmt.Sprintf("%s\n%s", testError, outputStr)
 				}
 				allTestErrors = append(allTestErrors, testError)

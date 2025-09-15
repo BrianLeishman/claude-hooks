@@ -62,10 +62,6 @@ func (h *TypeScriptHook) runESLint(files []string, verbose bool) error {
 
 		// Return detailed error information for Claude
 		if outputStr != "" {
-			// Limit output length to avoid overwhelming Claude
-			if len(outputStr) > 1500 {
-				outputStr = outputStr[:1500] + "\n... (output truncated, use verbose mode to see all issues)"
-			}
 			return fmt.Errorf("ESLint found issues:\n%s", outputStr)
 		}
 		return fmt.Errorf("ESLint failed with unknown errors")
@@ -97,10 +93,6 @@ func (h *TypeScriptHook) runTypeCheck(files []string, verbose bool) error {
 
 		// Return detailed error information for Claude
 		if outputStr != "" {
-			// Limit output length to avoid overwhelming Claude
-			if len(outputStr) > 1500 {
-				outputStr = outputStr[:1500] + "\n... (output truncated, use verbose mode to see all issues)"
-			}
 			return fmt.Errorf("TypeScript type check failed:\n%s", outputStr)
 		}
 		return fmt.Errorf("TypeScript type check failed with unknown errors")
