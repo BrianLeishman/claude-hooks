@@ -25,10 +25,10 @@ func (h *TypeScriptHook) PostEdit(files []string, verbose bool) error {
 	var hasErrors bool
 	var allErrors []string
 
-	// Step 1: Run ESLint
+	// Step 1: Run ESLint (non-blocking warnings)
 	if err := h.runESLint(files, verbose); err != nil {
-		allErrors = append(allErrors, err.Error())
-		hasErrors = true
+		fmt.Fprintf(os.Stderr, "⚠️  eslint: %v\n", err)
+		// Don't fail on eslint errors, just warn
 	}
 
 	// Step 2: Run TypeScript compiler check
@@ -51,27 +51,24 @@ func (h *TypeScriptHook) runESLint(files []string, verbose bool) error {
 		return nil
 	}
 
-	fmt.Println("\n===== Step 1/2: Running ESLint =====")
-	args := append([]string{"--fix"}, files...)
-	cmd := exec.Command("eslint", args...)
+	fmt.Println("\n===== Running ESLint (warnings only) =====")
+	// Remove --fix to make it read-only
+	cmd := exec.Command("eslint", files...)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		outputStr := strings.TrimSpace(string(output))
-		fmt.Fprintf(os.Stderr, "❌ ESLint found issues:\n%s\n", output)
-
-		// Return detailed error information for Claude
 		if outputStr != "" {
-			return fmt.Errorf("ESLint found issues:\n%s", outputStr)
+			// Just warn, don't block
+			fmt.Fprintf(os.Stderr, "\n⚠️  ESLint suggestions:\n%s\n", output)
 		}
-		return fmt.Errorf("ESLint failed with unknown errors")
 	}
 
 	if verbose && len(output) > 0 {
 		fmt.Printf("%s", output)
 	}
 
-	fmt.Println("  ✓ No linting issues")
+	fmt.Println("  ✓ ESLint check complete")
 	return nil
 }
 

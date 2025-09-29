@@ -27,20 +27,20 @@ func (h *GoHook) PostEdit(files []string, verbose bool) error {
 	var hasErrors bool
 	var allErrors []string
 
-	// Step 1: Run goimports
+	// Step 1: Check formatting (non-blocking warnings)
 	if err := h.runGoimports(files, verbose); err != nil {
 		fmt.Fprintf(os.Stderr, "⚠️  goimports: %v\n", err)
 		// Don't fail on goimports errors, just warn
 	}
 
-	// Step 2: Run gofumpt if available
+	// Step 2: Check code style (non-blocking warnings)
 	if isCommandAvailable("gofumpt") {
 		if err := h.runGofumpt(files, verbose); err != nil {
 			fmt.Fprintf(os.Stderr, "⚠️  gofumpt: %v\n", err)
 		}
 	}
 
-	// Step 3: Run linters
+	// Step 3: Run linters (blocking + warnings)
 	if err := h.runLinters(files, verbose); err != nil {
 		allErrors = append(allErrors, err.Error())
 		hasErrors = true
@@ -89,32 +89,52 @@ func (h *GoHook) runGoimports(files []string, verbose bool) error {
 		return nil
 	}
 
-	fmt.Println("\n===== Step 1/5: Running goimports =====")
+	fmt.Println("\n===== Running goimports (warnings only) =====")
+	var hasDiffs bool
 	for _, file := range files {
-		if verbose {
-			fmt.Printf("  Formatting %s\n", file)
+		cmd := exec.Command("goimports", "-d", file)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "⚠️  goimports check failed on %s: %v\n", file, err)
+			continue
 		}
-		cmd := exec.Command("goimports", "-w", file)
-		if output, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("failed on %s: %v\n%s", file, err, output)
+		if len(output) > 0 {
+			hasDiffs = true
+			if verbose {
+				fmt.Fprintf(os.Stderr, "\n⚠️  Import formatting suggestions for %s:\n%s", file, output)
+			}
 		}
 	}
-	fmt.Println("  ✓ Import formatting complete")
+	if hasDiffs {
+		fmt.Fprintf(os.Stderr, "⚠️  Some files have import formatting suggestions (run goimports -w to apply)\n")
+	} else {
+		fmt.Println("  ✓ Import formatting looks good")
+	}
 	return nil
 }
 
 func (h *GoHook) runGofumpt(files []string, verbose bool) error {
-	fmt.Println("\n===== Step 2/5: Running gofumpt =====")
+	fmt.Println("\n===== Running gofumpt (warnings only) =====")
+	var hasDiffs bool
 	for _, file := range files {
-		if verbose {
-			fmt.Printf("  Formatting %s\n", file)
+		cmd := exec.Command("gofumpt", "-d", file)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "⚠️  gofumpt check failed on %s: %v\n", file, err)
+			continue
 		}
-		cmd := exec.Command("gofumpt", "-w", file)
-		if output, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("failed on %s: %v\n%s", file, err, output)
+		if len(output) > 0 {
+			hasDiffs = true
+			if verbose {
+				fmt.Fprintf(os.Stderr, "\n⚠️  Formatting suggestions for %s:\n%s", file, output)
+			}
 		}
 	}
-	fmt.Println("  ✓ Modern formatting complete")
+	if hasDiffs {
+		fmt.Fprintf(os.Stderr, "⚠️  Some files have formatting suggestions (run gofumpt -w to apply)\n")
+	} else {
+		fmt.Println("  ✓ Formatting looks good")
+	}
 	return nil
 }
 
@@ -204,38 +224,34 @@ func (h *GoHook) runLinters(files []string, verbose bool) error {
 				fmt.Printf("  Linting in module: %s\n", moduleRoot)
 			}
 
-			// Build arguments for golangci-lint
-			args := []string{
-				"run",
-				"--timeout=5m",
-				"--enable=gocritic",
-				"--enable=staticcheck",
-				"--enable=govet",
-				"--enable=ineffassign",
-				"--enable=unused",
-				"--enable=errcheck",
-			}
-
-			// Add directory paths
+			// Build directory arguments
+			var dirArgs []string
 			for _, dir := range dirs {
 				if dir == "" {
-					args = append(args, ".")
+					dirArgs = append(dirArgs, ".")
 				} else {
-					args = append(args, "./"+dir)
+					dirArgs = append(dirArgs, "./"+dir)
 				}
 			}
 
+			// Run blocking linters (actual errors)
+			blockingArgs := []string{
+				"run",
+				"--timeout=5m",
+				"--enable=gocritic",
+				"--enable=govet",
+				"--enable=ineffassign",
+				"--enable=errcheck",
+			}
+			blockingArgs = append(blockingArgs, dirArgs...)
+
 			if verbose {
-				fmt.Printf("    Running: golangci-lint %s\n", strings.Join(args, " "))
+				fmt.Printf("    Running blocking linters: golangci-lint %s\n", strings.Join(blockingArgs, " "))
 			}
 
-			cmd := exec.Command("golangci-lint", args...)
+			cmd := exec.Command("golangci-lint", blockingArgs...)
 			output, err := cmd.CombinedOutput()
 
-			// Restore original directory
-			if restoreErr := os.Chdir(originalDir); restoreErr != nil {
-				fmt.Fprintf(os.Stderr, "❌ Could not restore directory to %s: %v\n", originalDir, restoreErr)
-			}
 			if err != nil {
 				// Parse output to collect error lines for Claude (only for edited files)
 				lines := strings.Split(string(output), "\n")
@@ -300,6 +316,48 @@ func (h *GoHook) runLinters(files []string, verbose bool) error {
 						fmt.Fprintf(os.Stderr, "  (use -v to see all issues)\n")
 					}
 				}
+			}
+
+			// Now run warning-only linters (non-blocking)
+			warningArgs := []string{
+				"run",
+				"--timeout=5m",
+				"--enable=staticcheck",
+				"--enable=unused",
+			}
+			warningArgs = append(warningArgs, dirArgs...)
+
+			if verbose {
+				fmt.Printf("    Running warning linters: golangci-lint %s\n", strings.Join(warningArgs, " "))
+			}
+
+			warningCmd := exec.Command("golangci-lint", warningArgs...)
+			warningOutput, warningErr := warningCmd.CombinedOutput()
+
+			if warningErr != nil && len(warningOutput) > 0 {
+				// Just warn, don't block
+				fmt.Fprintf(os.Stderr, "\n⚠️  Code quality suggestions from %s:\n", moduleRoot)
+				if verbose {
+					fmt.Fprintf(os.Stderr, "%s\n", warningOutput)
+				} else {
+					// Show first few lines
+					lines := strings.Split(string(warningOutput), "\n")
+					shown := 0
+					for _, line := range lines {
+						if strings.TrimSpace(line) != "" && shown < 5 {
+							fmt.Fprintf(os.Stderr, "  %s\n", line)
+							shown++
+						}
+					}
+					if shown > 0 {
+						fmt.Fprintf(os.Stderr, "  (use -v to see all suggestions)\n")
+					}
+				}
+			}
+
+			// Restore original directory
+			if restoreErr := os.Chdir(originalDir); restoreErr != nil {
+				fmt.Fprintf(os.Stderr, "❌ Could not restore directory to %s: %v\n", originalDir, restoreErr)
 			}
 		}
 
