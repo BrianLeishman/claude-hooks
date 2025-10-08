@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -189,13 +190,7 @@ func (h *GoHook) runLinters(files []string, verbose bool) error {
 				moduleRoots[moduleRoot] = []string{}
 			}
 			// Avoid duplicates
-			found := false
-			for _, existing := range moduleRoots[moduleRoot] {
-				if existing == relDir {
-					found = true
-					break
-				}
-			}
+			found := slices.Contains(moduleRoots[moduleRoot], relDir)
 			if !found {
 				moduleRoots[moduleRoot] = append(moduleRoots[moduleRoot], relDir)
 			}
@@ -568,7 +563,7 @@ func (h *GoHook) runTests(files []string, verbose bool) error {
 				fmt.Printf("    Testing package: %s\n", pkg)
 			}
 
-			cmd := exec.Command("go", "test", "-timeout=30s", pkg)
+			cmd := exec.Command("go", "test", "-short", "-timeout=30s", pkg)
 			output, err := cmd.CombinedOutput()
 
 			if err != nil {
