@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Go-based tool that provides automatic code formatting, linting, and testing hooks for Claude Code. It processes files after they are edited by Claude Code and runs language-specific quality checks.
+This is a Go-based tool that provides automatic code formatting and linting hooks for Claude Code. It processes files after they are edited by Claude Code and runs language-specific quality checks.
 
-The binary `claude-hook` reads JSON from stdin (provided by Claude Code) containing file paths that were modified, then runs appropriate formatters, linters, and tests based on file extensions.
+The binary `claude-hook` reads JSON from stdin (provided by Claude Code) containing file paths that were modified, then runs appropriate formatters and linters based on file extensions.
 
 ## Setup and Development Commands
 
@@ -37,7 +37,7 @@ make run-example-ts
 
 - **`cmd/claude-hook/main.go`**: Entry point that reads JSON from stdin, parses file paths, groups files by type, and dispatches to appropriate hooks
 - **`internal/hooks/hook.go`**: Defines the Hook interface and maintains a registry of language-specific hooks
-- **`internal/hooks/go_hook.go`**: Go-specific formatting (goimports, gofumpt), linting (golangci-lint), testing, and go mod tidy
+- **`internal/hooks/go_hook.go`**: Go-specific formatting (goimports, gofumpt), linting (golangci-lint), and go mod tidy
 - **`internal/hooks/typescript_hook.go`**: TypeScript/JavaScript formatting (prettier), linting (eslint), and type checking (tsc)
 
 ### Hook System Design
@@ -57,8 +57,7 @@ File types are determined by extension and mapped to hooks in `internal/hooks/ho
 1. **goimports**: Import organization and formatting
 2. **gofumpt**: Modern Go formatting (if available)
 3. **Linting**: golangci-lint with multiple linters, fallback to go vet
-4. **Testing**: Runs tests for modified files and their test counterparts
-5. **go mod tidy**: Dependency management
+4. **go mod tidy**: Dependency management
 
 ### TypeScript Hook Pipeline
 1. **eslint**: Linting with auto-fix

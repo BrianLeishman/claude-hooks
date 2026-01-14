@@ -47,13 +47,7 @@ func (h *GoHook) PostEdit(files []string, verbose bool) error {
 		hasErrors = true
 	}
 
-	// Step 4: Run tests for modified files
-	if err := h.runTests(files, verbose); err != nil {
-		allErrors = append(allErrors, err.Error())
-		hasErrors = true
-	}
-
-	// Step 5: Run go mod tidy if go.mod exists
+	// Step 4: Run go mod tidy if go.mod exists
 	if _, err := os.Stat("go.mod"); err == nil {
 		if err := h.runGoModTidy(verbose); err != nil {
 			fmt.Fprintf(os.Stderr, "⚠️  go mod tidy: %v\n", err)
@@ -140,7 +134,7 @@ func (h *GoHook) runGofumpt(files []string, verbose bool) error {
 }
 
 func (h *GoHook) runLinters(files []string, verbose bool) error {
-	fmt.Println("\n===== Step 3/5: Running linters =====")
+	fmt.Println("\n===== Step 3/4: Running linters =====")
 
 	if isCommandAvailable("golangci-lint") {
 		// Create a map of edited files for filtering
@@ -601,7 +595,7 @@ func (h *GoHook) runTests(files []string, verbose bool) error {
 }
 
 func (h *GoHook) runGoModTidy(verbose bool) error {
-	fmt.Println("\n===== Step 5/5: Running go mod tidy =====")
+	fmt.Println("\n===== Step 4/4: Running go mod tidy =====")
 
 	cmd := exec.Command("go", "mod", "tidy")
 	output, err := cmd.CombinedOutput()
