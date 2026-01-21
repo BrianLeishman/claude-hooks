@@ -78,6 +78,16 @@ The setup command automatically configures Claude Code hooks using:
 - Command: `bash -c "cd /path/to/claude-hooks && go run cmd/claude-hook/main.go -type pre-bash"`
 - **Blocks MySQL CLI tools** (mysql, mysqldump, mariadb) using smart executable detection to prevent accidental database access
 
+### PreToolUse Hook (AI Council Plan Review)
+- Event: `PreToolUse`
+- Matcher: `ExitPlanMode`
+- Command: `bash -c "cd /path/to/claude-hooks && go run cmd/claude-hook/main.go -type plan-review"`
+- **Reviews plans with 3 AI models in parallel** before finalizing:
+  1. **Claude Opus 4.5** - via `claude` CLI
+  2. **GPT-5.2** - via `codex exec` CLI with high reasoning effort
+  3. **Gemini 3 Pro** - via `gemini` CLI
+- Returns aggregated feedback so you can adjust the plan before presenting it
+
 **🔄 Live Reloading**: Changes to hook code take effect immediately - no rebuild or reinstall needed!
 
 The hooks will exit with code 2 on failures to make them blocking in Claude Code, preventing further operations until issues are resolved.

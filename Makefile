@@ -20,3 +20,7 @@ run-example-go:
 
 run-example-ts:
 	echo '{"tool_input": {"file_paths": ["example.ts"]}}' | go run cmd/claude-hook/main.go -v
+
+run-plan-review:
+	@echo "Testing plan review hook (requires claude, codex, gemini CLIs)..."
+	echo '{"tool_name": "ExitPlanMode", "transcript_path": "", "cwd": "."}' | go run cmd/claude-hook/main.go -type plan-review -v

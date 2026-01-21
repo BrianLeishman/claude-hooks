@@ -19,12 +19,15 @@ type ToolInput struct {
 	FilePath  string   `json:"file_path"`
 	FilePaths []string `json:"file_paths"`
 	Command   string   `json:"command"` // For Bash commands in PreToolUse
+	Content   string   `json:"content"` // For Write tool content
 }
 
 // Input represents the complete input structure
 type Input struct {
-	ToolName  string    `json:"tool_name"` // Tool being called (e.g., "Bash")
-	ToolInput ToolInput `json:"tool_input"`
+	ToolName       string    `json:"tool_name"` // Tool being called (e.g., "Bash")
+	ToolInput      ToolInput `json:"tool_input"`
+	TranscriptPath string    `json:"transcript_path"` // Path to conversation transcript
+	Cwd            string    `json:"cwd"`             // Current working directory
 }
 
 // HookOutput represents the JSON response for PostToolUse hooks
@@ -210,6 +213,12 @@ func main() {
 	// Handle pre-bash blocking for MySQL commands
 	if *hookType == "pre-bash" {
 		handlePreBashBlocking(input, *verbose)
+		return
+	}
+
+	// Handle plan review for ExitPlanMode
+	if *hookType == "plan-review" {
+		handlePlanReview(input, *verbose)
 		return
 	}
 
@@ -492,6 +501,60 @@ func handlePreBashBlocking(input Input, verbose bool) {
 
 	// Command is allowed
 	os.Exit(0)
+}
+
+// handlePlanReview runs the plan through multiple AI models for feedback
+func handlePlanReview(input Input, verbose bool) {
+	// Always log to stderr so we can see if the hook is being called
+	fmt.Fprintf(os.Stderr, "🧠 AI Council hook triggered!\n")
+	fmt.Fprintf(os.Stderr, "   Tool: %s\n", input.ToolName)
+	fmt.Fprintf(os.Stderr, "   Transcript: %s\n", input.TranscriptPath)
+	fmt.Fprintf(os.Stderr, "   CWD: %s\n", input.Cwd)
+
+	// Only run for ExitPlanMode tool
+	if input.ToolName != "ExitPlanMode" {
+		fmt.Fprintf(os.Stderr, "⏭️  Skipping - not ExitPlanMode (got: %s)\n", input.ToolName)
+		os.Exit(0)
+	}
+
+	reviewInput := hooks.PlanReviewInput{
+		TranscriptPath: input.TranscriptPath,
+		Cwd:            input.Cwd,
+	}
+
+	result, err := hooks.ReviewPlan(reviewInput, verbose)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "⚠️  Plan review error: %v\n", err)
+		// Don't block on review errors, just warn
+		os.Exit(0)
+	}
+
+	// Use JSON output with "deny" to block and show feedback to Claude
+	// This is the same pattern used by pre-bash blocking
+	output := PreToolUseOutput{
+		HookSpecificOutput: PreToolUseHookOutput{
+			HookEventName:            "PreToolUse",
+			PermissionDecision:       "deny", // Block so Claude sees the feedback
+			PermissionDecisionReason: result.Summary + "\n\n📋 Please review the AI Council feedback above and adjust your plan if needed. Then call ExitPlanMode again to finalize.",
+		},
+	}
+
+	jsonOutput, err := json.Marshal(output)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to marshal JSON output: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Output JSON to stdout for Claude to read
+	fmt.Println(string(jsonOutput))
+
+	// Also show human-readable summary to stderr for the user
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, strings.Repeat("=", 60))
+	fmt.Fprintln(os.Stderr, result.Summary)
+	fmt.Fprintln(os.Stderr, strings.Repeat("=", 60))
+
+	os.Exit(0) // Exit 0 since we provided JSON
 }
 
 // parseCompoundCommand splits a shell command by common operators to extract sub-commands
