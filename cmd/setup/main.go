@@ -56,6 +56,7 @@ func main() {
 	postHookCommand := fmt.Sprintf("bash -c \"cd %s && go run cmd/claude-hook/main.go -type post-edit\"", cwd)
 	preHookCommand := fmt.Sprintf("bash -c \"cd %s && go run cmd/claude-hook/main.go -type pre-bash\"", cwd)
 	planReviewCommand := fmt.Sprintf("bash -c \"cd %s && go run cmd/claude-hook/main.go -type plan-review\"", cwd)
+	sessionStartCommand := fmt.Sprintf("bash -c \"cd %s && go run cmd/claude-hook/main.go -type session-start\"", cwd)
 
 	// Add our hook configurations
 	err = addPostToolUseHook(settings, postHookCommand)
@@ -73,6 +74,12 @@ func main() {
 	err = addPlanReviewHook(settings, planReviewCommand)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "❌ Error configuring PlanReview hook: %v\n", err)
+		os.Exit(1)
+	}
+
+	err = addSessionStartHook(settings, sessionStartCommand)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ Error configuring SessionStart hook: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -94,6 +101,8 @@ func main() {
 	fmt.Printf("    Command: %s\n", preHookCommand)
 	fmt.Println("  PreToolUse Event: ExitPlanMode (AI Council plan review)")
 	fmt.Printf("    Command: %s\n", planReviewCommand)
+	fmt.Println("  SessionStart Event: startup|compact (inject agents.md)")
+	fmt.Printf("    Command: %s\n", sessionStartCommand)
 	fmt.Println("")
 	fmt.Println("🔄 Live reloading enabled - changes to hook code take effect immediately!")
 	fmt.Println("")
@@ -107,6 +116,7 @@ func main() {
 	fmt.Println("  - Block MySQL commands (use Go database methods instead)")
 	fmt.Println("  - Block git commits on master/main branches (create feature branches instead)")
 	fmt.Println("  - 🧠 Review plans with AI Council (Claude Opus, GPT-5.2, Gemini 3 Pro)")
+	fmt.Println("  - Inject agents.md into context on session start and after compaction")
 }
 
 func readOrCreateSettings(settingsPath string) (*ClaudeSettings, error) {
@@ -262,6 +272,43 @@ func addPlanReviewHook(settings *ClaudeSettings, hookCommand string) error {
 	}
 
 	settings.Hooks["PreToolUse"] = append(preToolUse, newMatcher)
+	return nil
+}
+
+func addSessionStartHook(settings *ClaudeSettings, hookCommand string) error {
+	// Check if our hook already exists in SessionStart
+	sessionStart := settings.Hooks["SessionStart"]
+
+	for i, matcher := range sessionStart {
+		if matcher.Matcher == "startup|compact" {
+			// Check if our command already exists
+			for _, hook := range matcher.Hooks {
+				if hook.Command == hookCommand {
+					fmt.Println("SessionStart hook already configured, skipping...")
+					return nil
+				}
+			}
+
+			// Add our hook to existing matcher
+			sessionStart[i].Hooks = append(sessionStart[i].Hooks, Hook{
+				Type:    "command",
+				Command: hookCommand,
+			})
+			settings.Hooks["SessionStart"] = sessionStart
+			return nil
+		}
+	}
+
+	// No existing matcher found, create new one
+	newMatcher := HookMatcher{
+		Matcher: "startup|compact",
+		Hooks: []Hook{{
+			Type:    "command",
+			Command: hookCommand,
+		}},
+	}
+
+	settings.Hooks["SessionStart"] = append(sessionStart, newMatcher)
 	return nil
 }
 

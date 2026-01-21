@@ -47,6 +47,15 @@ type PreToolUseHookOutput struct {
 	PermissionDecisionReason string `json:"permissionDecisionReason"`
 }
 
+// SessionStartInput represents the input for SessionStart hooks
+type SessionStartInput struct {
+	SessionID      string `json:"session_id"`
+	TranscriptPath string `json:"transcript_path"`
+	PermissionMode string `json:"permission_mode"`
+	HookEventName  string `json:"hook_event_name"`
+	Source         string `json:"source"` // "startup", "resume", "clear", or "compact"
+}
+
 // getCurrentBranch returns the current git branch name, or empty string if not in a git repo
 // workingDir specifies which directory to check (empty string uses current directory)
 func getCurrentBranch(workingDir string, verbose bool) string {
@@ -187,13 +196,82 @@ func findGitRoot(filePath string, verbose bool) string {
 	return ""
 }
 
+func handleSessionStart(verbose bool) {
+	// Read SessionStart input from stdin
+	var input SessionStartInput
+	decoder := json.NewDecoder(os.Stdin)
+	if err := decoder.Decode(&input); err != nil {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "Failed to parse SessionStart input: %v\n", err)
+		}
+		os.Exit(0)
+	}
+
+	if verbose {
+		fmt.Fprintf(os.Stderr, "SessionStart hook triggered (source: %s)\n", input.Source)
+	}
+
+	// Determine the working directory
+	workingDir := os.Getenv("CLAUDE_CODE_CWD")
+	if workingDir == "" && input.TranscriptPath != "" {
+		// Try to infer from transcript path
+		workingDir = filepath.Dir(input.TranscriptPath)
+		// Go up one level from .claude/projects/...
+		workingDir = filepath.Dir(filepath.Dir(workingDir))
+	}
+
+	if workingDir == "" {
+		// Fallback to current directory
+		var err error
+		workingDir, err = os.Getwd()
+		if err != nil {
+			if verbose {
+				fmt.Fprintf(os.Stderr, "Could not determine working directory: %v\n", err)
+			}
+			os.Exit(0)
+		}
+	}
+
+	if verbose {
+		fmt.Fprintf(os.Stderr, "Looking for agents.md in: %s\n", workingDir)
+	}
+
+	// Look for agents.md in the working directory
+	agentsPath := filepath.Join(workingDir, "agents.md")
+	content, err := os.ReadFile(agentsPath)
+	if err != nil {
+		if verbose {
+			if os.IsNotExist(err) {
+				fmt.Fprintf(os.Stderr, "agents.md not found, skipping injection\n")
+			} else {
+				fmt.Fprintf(os.Stderr, "Error reading agents.md: %v\n", err)
+			}
+		}
+		os.Exit(0)
+	}
+
+	if verbose {
+		fmt.Fprintf(os.Stderr, "Injecting agents.md content (%d bytes)\n", len(content))
+	}
+
+	// Output the content to stdout (this gets injected into Claude's context)
+	fmt.Println(string(content))
+	os.Exit(0)
+}
+
 func main() {
 	// Parse command-line flags
 	var (
-		hookType = flag.String("type", "post-edit", "Hook type (post-edit, pre-edit, pre-bash)")
+		hookType = flag.String("type", "post-edit", "Hook type (post-edit, pre-edit, pre-bash, session-start)")
 		verbose  = flag.Bool("v", false, "Verbose output")
 	)
 	flag.Parse()
+
+	// Handle session-start hook separately (different input format)
+	if *hookType == "session-start" {
+		handleSessionStart(*verbose)
+		return
+	}
 
 	// Read input from stdin (Claude Code sends JSON via stdin)
 	var input Input

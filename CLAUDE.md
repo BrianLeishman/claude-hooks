@@ -88,9 +88,24 @@ The setup command automatically configures Claude Code hooks using:
   3. **Gemini 3 Pro** - via `gemini` CLI
 - Returns aggregated feedback so you can adjust the plan before presenting it
 
+### SessionStart Hook (Context Injection)
+- Event: `SessionStart`
+- Matcher: `startup|compact`
+- Command: `bash -c "cd /path/to/claude-hooks && go run cmd/claude-hook/main.go -type session-start"`
+- **Injects agents.md** from repository root into Claude's context on session start and after compaction
+- Gracefully handles missing files (no error if agents.md doesn't exist)
+
 **🔄 Live Reloading**: Changes to hook code take effect immediately - no rebuild or reinstall needed!
 
 The hooks will exit with code 2 on failures to make them blocking in Claude Code, preventing further operations until issues are resolved.
+
+### agents.md Context Injection
+
+Place an `agents.md` file in your repository root (same directory where Claude Code runs) to automatically inject project-specific instructions into Claude's context. The file will be loaded:
+- On session startup
+- After context compaction
+
+This is useful for providing project-specific coding conventions, patterns, or context that Claude should always have available.
 
 ## File Filtering
 
