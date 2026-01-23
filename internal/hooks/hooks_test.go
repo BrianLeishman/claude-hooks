@@ -32,7 +32,7 @@ func TestSelfEdit(t *testing.T) {
 	}
 
 	// Run the hook
-	err = runHookWithInput(input, "post-edit")
+	_, err = runHookWithInput(input, "post-edit")
 	if err != nil {
 		t.Fatalf("Hook failed on self-edit: %v", err)
 	}
@@ -74,7 +74,7 @@ console.log(greetUser({ name: "Claude", age: 1 }));`
 	}
 
 	// Run the hook
-	err = runHookWithInput(input, "post-edit")
+	_, err = runHookWithInput(input, "post-edit")
 	if err != nil {
 		t.Fatalf("Hook failed on TypeScript file: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestMultiFileEdit(t *testing.T) {
 	}
 
 	// Run the hook
-	err := runHookWithInput(input, "post-edit")
+	_, err := runHookWithInput(input, "post-edit")
 	if err != nil {
 		t.Fatalf("Hook failed on multi-file edit: %v", err)
 	}
@@ -151,30 +151,30 @@ func main() {
 		},
 	}
 
-	// Run the hook - this should fail
-	err = runHookWithInput(input, "post-edit")
-	if err == nil {
-		t.Fatalf("Hook should have failed on broken Go file")
+	// Run the hook - this should return JSON with "block" decision
+	output, err := runHookWithInput(input, "post-edit")
+	if err != nil {
+		t.Fatalf("Hook command failed: %v", err)
 	}
 
-	// Check that error message contains useful information
-	if !strings.Contains(err.Error(), "exit status") {
-		t.Fatalf("Expected hook to fail with exit status, got: %v", err)
+	// Check that output contains block decision
+	if !strings.Contains(output, `"decision":"block"`) && !strings.Contains(output, `"decision": "block"`) {
+		t.Fatalf("Expected hook to block on broken Go file, got output: %s", output)
 	}
 }
 
 // Helper function to run hook with input
-func runHookWithInput(input any, hookType string) error {
+func runHookWithInput(input any, hookType string) (string, error) {
 	// Marshal input to JSON
 	inputJSON, err := json.Marshal(input)
 	if err != nil {
-		return fmt.Errorf("failed to marshal input: %v", err)
+		return "", fmt.Errorf("failed to marshal input: %v", err)
 	}
 
 	// Get the project root directory
 	wd, err := os.Getwd()
 	if err != nil {
-		return fmt.Errorf("failed to get working directory: %v", err)
+		return "", fmt.Errorf("failed to get working directory: %v", err)
 	}
 
 	// Navigate to project root (two levels up from internal/hooks)
@@ -186,11 +186,12 @@ func runHookWithInput(input any, hookType string) error {
 	cmd.Stdin = strings.NewReader(string(inputJSON))
 
 	output, err := cmd.CombinedOutput()
+	outputStr := string(output)
 	if err != nil {
-		return fmt.Errorf("hook command failed: %v\nOutput: %s", err, output)
+		return outputStr, fmt.Errorf("hook command failed: %v\nOutput: %s", err, output)
 	}
 
-	return nil
+	return outputStr, nil
 }
 
 // TestHookRegistry ensures all hooks are properly registered

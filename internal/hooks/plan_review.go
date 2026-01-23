@@ -112,7 +112,8 @@ func extractPlanFromTranscript(transcriptPath string, verbose bool) (string, err
 
 	// Transcript is JSONL format - read line by line
 	lines := strings.Split(string(data), "\n")
-	var lastAssistantContent string
+	var bestPlan string
+	var bestScore int
 
 	for _, line := range lines {
 		if strings.TrimSpace(line) == "" {
@@ -127,20 +128,62 @@ func extractPlanFromTranscript(transcriptPath string, verbose bool) (string, err
 		// Look for assistant messages that might contain a plan
 		if entry.Message.Role == "assistant" {
 			content := extractContentString(entry.Message.Content)
-			if content != "" && (strings.Contains(strings.ToLower(content), "plan") ||
-				strings.Contains(content, "##") ||
-				strings.Contains(content, "1.") ||
-				strings.Contains(content, "Step")) {
-				lastAssistantContent = content
+			score := scorePlan(content)
+			// Keep the last candidate that has the highest or equal score
+			// This ensures we get the most recent version of a plan if there are multiple
+			if score > 0 && score >= bestScore {
+				bestScore = score
+				bestPlan = content
 			}
 		}
 	}
 
-	if lastAssistantContent == "" {
+	if bestPlan == "" {
 		return "", fmt.Errorf("no plan content found in transcript")
 	}
 
-	return lastAssistantContent, nil
+	return bestPlan, nil
+}
+
+// scorePlan evaluates how likely a message is to be a detailed plan
+func scorePlan(content string) int {
+	if content == "" {
+		return 0
+	}
+	
+	// Filter out very short messages (likely conversational fillers)
+	// "Now let me write up the implementation plan." is ~44 chars
+	if len(content) < 50 {
+		return 0
+	}
+
+	score := 0
+	lower := strings.ToLower(content)
+
+	// High value indicators
+	if strings.Contains(content, "## Plan") || 
+	   strings.Contains(content, "## Implementation") || 
+	   strings.Contains(content, "## Proposed Approach") {
+		score += 100
+	}
+
+	// Structural indicators
+	if strings.Contains(content, "1. ") && strings.Contains(content, "2. ") {
+		score += 20
+	}
+	if strings.Contains(content, "- [ ]") || strings.Contains(content, "- [x]") {
+		score += 20
+	}
+
+	// content keywords
+	if strings.Contains(lower, "plan") {
+		score += 10
+	}
+	if strings.Contains(lower, "step") {
+		score += 5
+	}
+
+	return score
 }
 
 // extractContentString extracts string content from various message formats
