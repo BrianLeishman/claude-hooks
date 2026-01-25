@@ -583,56 +583,9 @@ func handlePreBashBlocking(input Input, verbose bool) {
 
 // handlePlanReview runs the plan through multiple AI models for feedback
 func handlePlanReview(input Input, verbose bool) {
-	// Always log to stderr so we can see if the hook is being called
-	fmt.Fprintf(os.Stderr, "🧠 AI Council hook triggered!\n")
-	fmt.Fprintf(os.Stderr, "   Tool: %s\n", input.ToolName)
-	fmt.Fprintf(os.Stderr, "   Transcript: %s\n", input.TranscriptPath)
-	fmt.Fprintf(os.Stderr, "   CWD: %s\n", input.Cwd)
-
-	// Only run for ExitPlanMode tool
-	if input.ToolName != "ExitPlanMode" {
-		fmt.Fprintf(os.Stderr, "⏭️  Skipping - not ExitPlanMode (got: %s)\n", input.ToolName)
-		os.Exit(0)
-	}
-
-	reviewInput := hooks.PlanReviewInput{
-		TranscriptPath: input.TranscriptPath,
-		Cwd:            input.Cwd,
-	}
-
-	result, err := hooks.ReviewPlan(reviewInput, verbose)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "⚠️  Plan review error: %v\n", err)
-		// Don't block on review errors, just warn
-		os.Exit(0)
-	}
-
-	// Use JSON output with "deny" to block and show feedback to Claude
-	// This is the same pattern used by pre-bash blocking
-	output := PreToolUseOutput{
-		HookSpecificOutput: PreToolUseHookOutput{
-			HookEventName:            "PreToolUse",
-			PermissionDecision:       "deny", // Block so Claude sees the feedback
-			PermissionDecisionReason: result.Summary + "\n\n📋 Please review the AI Council feedback above and adjust your plan if needed. Then call ExitPlanMode again to finalize.",
-		},
-	}
-
-	jsonOutput, err := json.Marshal(output)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to marshal JSON output: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Output JSON to stdout for Claude to read
-	fmt.Println(string(jsonOutput))
-
-	// Also show human-readable summary to stderr for the user
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, strings.Repeat("=", 60))
-	fmt.Fprintln(os.Stderr, result.Summary)
-	fmt.Fprintln(os.Stderr, strings.Repeat("=", 60))
-
-	os.Exit(0) // Exit 0 since we provided JSON
+	// Plan review disabled - was blocking plans from ever being finalized
+	// The hook always returned "deny" to show feedback, creating an infinite loop
+	os.Exit(0)
 }
 
 // parseCompoundCommand splits a shell command by common operators to extract sub-commands
