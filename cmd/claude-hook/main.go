@@ -583,8 +583,54 @@ func handlePreBashBlocking(input Input, verbose bool) {
 
 // handlePlanReview runs the plan through multiple AI models for feedback
 func handlePlanReview(input Input, verbose bool) {
-	// Plan review disabled - was blocking plans from ever being finalized
-	// The hook always returned "deny" to show feedback, creating an infinite loop
+	// Always log to stderr so we can see if the hook is being called
+	fmt.Fprintf(os.Stderr, "🧠 AI Council hook triggered!\n")
+	fmt.Fprintf(os.Stderr, "   Tool: %s\n", input.ToolName)
+	fmt.Fprintf(os.Stderr, "   Transcript: %s\n", input.TranscriptPath)
+	fmt.Fprintf(os.Stderr, "   CWD: %s\n", input.Cwd)
+
+	// Only run for ExitPlanMode tool
+	if input.ToolName != "ExitPlanMode" {
+		fmt.Fprintf(os.Stderr, "⏭️  Skipping - not ExitPlanMode (got: %s)\n", input.ToolName)
+		os.Exit(0)
+	}
+
+	reviewInput := hooks.PlanReviewInput{
+		TranscriptPath: input.TranscriptPath,
+		Cwd:            input.Cwd,
+	}
+
+	result, err := hooks.ReviewPlan(reviewInput, verbose)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "⚠️  Plan review error: %v\n", err)
+		// Don't block on review errors, just warn
+		os.Exit(0)
+	}
+
+	// Show human-readable summary to stderr for the user
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, strings.Repeat("=", 60))
+	fmt.Fprintln(os.Stderr, result.Summary)
+	fmt.Fprintln(os.Stderr, strings.Repeat("=", 60))
+
+	// ALLOW the plan to proceed - feedback has been shown
+	// Use JSON output with "allow" so the plan can finalize
+	output := PreToolUseOutput{
+		HookSpecificOutput: PreToolUseHookOutput{
+			HookEventName:            "PreToolUse",
+			PermissionDecision:       "allow",
+			PermissionDecisionReason: "AI Council review complete. Feedback shown above.",
+		},
+	}
+
+	jsonOutput, err := json.Marshal(output)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to marshal JSON output: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Output JSON to stdout for Claude to read
+	fmt.Println(string(jsonOutput))
 	os.Exit(0)
 }
 

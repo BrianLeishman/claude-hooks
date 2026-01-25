@@ -236,14 +236,15 @@ func runClaudeReview(prompt string, verbose bool) AIReview {
 		fmt.Fprintf(os.Stderr, "🤖 Starting Claude Opus 4.5 review...\n")
 	}
 
-	// Try using the claude CLI if available
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
+	// claude --print "prompt" --model ... --dangerously-skip-permissions
 	cmd := exec.CommandContext(ctx, "claude",
-		"-p", prompt,
+		"--print",
 		"--model", "claude-opus-4-5-20251101",
 		"--dangerously-skip-permissions",
+		prompt,
 	)
 
 	var stdout, stderr bytes.Buffer
@@ -254,10 +255,12 @@ func runClaudeReview(prompt string, verbose bool) AIReview {
 	review.Duration = time.Since(start).Round(time.Second).String()
 
 	if err != nil {
-		// Check if claude CLI is not installed
 		if strings.Contains(err.Error(), "executable file not found") {
 			review.Error = "Claude CLI not installed (npm install -g @anthropic-ai/claude-code)"
 			review.Feedback = "⚠️ Claude CLI not available - install with: npm install -g @anthropic-ai/claude-code"
+		} else if ctx.Err() == context.DeadlineExceeded {
+			review.Error = "Claude review timed out (2m)"
+			review.Feedback = "⚠️ Claude review timed out"
 		} else {
 			review.Error = fmt.Sprintf("Claude review failed: %v - %s", err, stderr.String())
 			review.Feedback = "⚠️ Claude review failed - see error"
@@ -275,22 +278,23 @@ func runClaudeReview(prompt string, verbose bool) AIReview {
 	return review
 }
 
-// runCodexReview runs the plan through OpenAI Codex CLI with GPT-5.2
+// runCodexReview runs the plan through OpenAI Codex CLI with o3
 func runCodexReview(prompt string, verbose bool) AIReview {
 	start := time.Now()
-	review := AIReview{Model: "GPT-5.2 (Codex)"}
+	review := AIReview{Model: "o3 (Codex)"}
 
 	if verbose {
-		fmt.Fprintf(os.Stderr, "🤖 Starting Codex/GPT-5.2 review...\n")
+		fmt.Fprintf(os.Stderr, "🤖 Starting Codex/o3 review...\n")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "codex", "exec", prompt,
+	// codex exec "prompt" --model o3 --dangerously-bypass-approvals-and-sandbox
+	cmd := exec.CommandContext(ctx, "codex", "exec",
+		"--model", "o3",
 		"--dangerously-bypass-approvals-and-sandbox",
-		"--model", "gpt-5.2",
-		"--config", "model_reasoning_effort=high",
+		prompt,
 	)
 
 	var stdout, stderr bytes.Buffer
@@ -304,6 +308,9 @@ func runCodexReview(prompt string, verbose bool) AIReview {
 		if strings.Contains(err.Error(), "executable file not found") {
 			review.Error = "Codex CLI not installed"
 			review.Feedback = "⚠️ Codex CLI not available - install OpenAI's Codex CLI"
+		} else if ctx.Err() == context.DeadlineExceeded {
+			review.Error = "Codex review timed out (2m)"
+			review.Feedback = "⚠️ Codex review timed out"
 		} else {
 			review.Error = fmt.Sprintf("Codex review failed: %v - %s", err, stderr.String())
 			review.Feedback = "⚠️ Codex review failed - see error"
@@ -330,13 +337,17 @@ func runGeminiReview(prompt string, verbose bool) AIReview {
 		fmt.Fprintf(os.Stderr, "🤖 Starting Gemini review...\n")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	// Shorter timeout for Gemini since it can get stuck
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
+	// Gemini CLI expects prompt as positional arg, not -p flag (deprecated)
+	// Use --output-format text for clean output
 	cmd := exec.CommandContext(ctx, "gemini",
 		"--yolo",
-		"--model", "gemini-3-pro-preview",
-		"-p", prompt,
+		"--model", "gemini-2.5-pro",
+		"--output-format", "text",
+		prompt,
 	)
 
 	var stdout, stderr bytes.Buffer
@@ -350,6 +361,9 @@ func runGeminiReview(prompt string, verbose bool) AIReview {
 		if strings.Contains(err.Error(), "executable file not found") {
 			review.Error = "Gemini CLI not installed"
 			review.Feedback = "⚠️ Gemini CLI not available - install Google's Gemini CLI"
+		} else if ctx.Err() == context.DeadlineExceeded {
+			review.Error = "Gemini review timed out (60s)"
+			review.Feedback = "⚠️ Gemini review timed out"
 		} else {
 			review.Error = fmt.Sprintf("Gemini review failed: %v - %s", err, stderr.String())
 			review.Feedback = "⚠️ Gemini review failed - see error"
